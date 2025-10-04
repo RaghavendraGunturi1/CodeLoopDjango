@@ -1,0 +1,33 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>My Quizzes</h2>
+<a href="{% url 'teacher_quiz_create' %}" class="btn btn-success mb-3">Create New Quiz</a>
+<table class="table table-bordered">
+    <thead>
+        <tr>
+            <th>Title</th>
+            <th>Description</th>
+            <th>Questions</th>
+            <th>Created</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for quiz in quizzes %}
+        <tr>
+            <td>{{ quiz.title }}</td>
+            <td>{{ quiz.description|default:"-" }}</td>
+            <td>{{ quiz.questions.count }}</td>
+            <td>{{ quiz.created_at|date:"Y-m-d H:i" }}</td>
+            <td>
+                <a href="{% url 'teacher_quiz_edit' quiz.id %}" class="btn btn-sm btn-primary">Edit</a>
+                <a href="{% url 'teacher_quiz_delete' quiz.id %}" class="btn btn-sm btn-danger">Delete</a>
+                <a href="{% url 'take_quiz' quiz.id %}" class="btn btn-sm btn-outline-secondary">Preview</a>
+            </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5">No quizzes found.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

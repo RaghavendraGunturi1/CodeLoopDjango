@@ -1,0 +1,10 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>{{ action }} Group</h2>
+<form method="post">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit" class="btn btn-success">{{ action }}</button>
+  <a href="{% url 'teacher_group_list' %}" class="btn btn-secondary">Cancel</a>
+</form>
+{% endblock %}

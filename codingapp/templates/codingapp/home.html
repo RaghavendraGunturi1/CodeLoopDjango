@@ -1,0 +1,16 @@
+{% extends 'codingapp/base.html' %}
+
+{% block title %}Home - Coding Platform{% endblock %}
+
+{% block content %}
+    <h2>Welcome to the Coding Platform!</h2>
+    <p>Choose a question to solve:</p>
+
+    <ul class="list-group mt-3">
+        {% for question in questions %}
+            <li class="list-group-item">
+                <a href="{% url 'question_detail' question.pk %}">{{ question.title }}</a>
+            </li>
+        {% endfor %}
+    </ul>
+{% endblock %}

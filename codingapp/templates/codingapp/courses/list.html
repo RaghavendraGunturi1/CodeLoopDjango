@@ -1,0 +1,16 @@
+{% extends 'codingapp/base.html' %}
+{% block content %}
+<h2>Available Courses</h2>
+<div class="row">
+  {% for course in courses %}
+    <div class="card col-md-4 m-2 p-2">
+      <h4>{{ course.title }}</h4>
+      <p>{{ course.description|truncatewords:20 }}</p>
+      <span class="badge bg-info">{{ course.difficulty }}</span>
+      <a href="{% url 'course_detail' course.pk %}" class="btn btn-primary btn-sm mt-2">View</a>
+    </div>
+  {% empty %}
+    <p>No courses available.</p>
+  {% endfor %}
+</div>
+{% endblock %}

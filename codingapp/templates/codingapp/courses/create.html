@@ -1,0 +1,181 @@
+{% extends 'codingapp/base.html' %}
+{% load widget_tweaks %}
+{% block content %}
+
+<div class="container">
+  <h2 class="mb-4">Create / Edit Course</h2>
+  <form method="post" class="p-4 border rounded bg-white shadow-sm" id="course-form">
+    {% csrf_token %}
+
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label for="id_title" class="form-label">Title</label>
+        {{ form.title|add_class:"form-control" }}
+      </div>
+      <div class="col-md-6 mb-3">
+        <label for="id_difficulty" class="form-label">Difficulty</label>
+        {{ form.difficulty|add_class:"form-select" }}
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <label for="id_description" class="form-label">Description</label>
+      {{ form.description|add_class:"form-control" }}
+    </div>
+
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label for="id_prerequisites" class="form-label">Prerequisites</label>
+        {{ form.prerequisites|add_class:"form-control" }}
+      </div>
+      <div class="col-md-6 mb-3">
+        <label for="id_time_to_complete" class="form-label">Time to Complete</label>
+        {{ form.time_to_complete|add_class:"form-control" }}
+        <small class="text-muted">Format: 1 day 2:30, 2h 15m, or 01:30:00</small>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label for="id_groups" class="form-label">Groups</label>
+        {{ form.groups|add_class:"form-control" }}
+      </div>
+      <div class="col-md-6 mb-3 d-flex align-items-center pt-4">
+        <div class="form-check">
+          {{ form.is_public }}
+          <label class="form-check-label ms-1" for="id_is_public">Public?</label>
+        </div>
+      </div>
+    </div>
+
+    <hr>
+    <h4 class="mb-3">Course Content</h4>
+    {{ formset.management_form }}
+    <div id="formset-container">
+{% for form in formset %}
+  <div class="border p-3 mb-3 rounded bg-light content-form">
+    {% for hidden in form.hidden_fields %}
+      {{ hidden }}
+    {% endfor %}
+
+    <div class="row">
+      <div class="col-md-6 mb-2">
+        {{ form.title.label_tag }} {{ form.title|add_class:"form-control" }}
+      </div>
+      <div class="col-md-6 mb-2">
+        {{ form.video_url.label_tag }} {{ form.video_url|add_class:"form-control" }}
+      </div>
+    </div>
+    <div class="mb-2">
+      {{ form.content.label_tag }} {{ form.content|add_class:"form-control rich-text" }}
+    </div>
+    <div class="row">
+      <div class="col-md-4">
+        {{ form.order.label_tag }} {{ form.order|add_class:"form-control" }}
+      </div>
+      <div class="col-md-4 d-flex align-items-center">
+        <div class="form-check mt-4">
+          {{ form.DELETE }} <label class="form-check-label">Delete</label>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endfor %}
+
+    </div>
+
+    <button type="button" class="btn btn-outline-primary mb-3" id="add-more">➕ Add More Content</button>
+    <button type="submit" class="btn btn-success">Save</button>
+  </form>
+
+  <!-- Empty template for JavaScript cloning -->
+  <template id="empty-form-template">
+    <div class="border p-3 mb-3 rounded bg-light content-form">
+        <input type="hidden" name="contents-__prefix__-id" id="id_contents-__prefix__-id">
+      <div class="row">
+        <div class="col-md-6 mb-2">
+          <label>Title</label>
+          <input type="text" name="contents-__prefix__-title" class="form-control">
+        </div>
+        <div class="col-md-6 mb-2">
+          <label>Video URL</label>
+          <input type="url" name="contents-__prefix__-video_url" class="form-control">
+        </div>
+      </div>
+      <div class="mb-2">
+        <label>Content</label>
+        <textarea name="contents-__prefix__-content" class="form-control rich-text"></textarea>
+      </div>
+      <div class="row">
+        <div class="col-md-4">
+          <label>Order</label>
+          <input type="number" name="contents-__prefix__-order" class="form-control">
+        </div>
+        <div class="col-md-4 d-flex align-items-center">
+          <div class="form-check mt-4">
+            <input type="checkbox" name="contents-__prefix__-DELETE">
+            <label class="form-check-label">Delete</label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.ckeditor.com/ckeditor5/41.1.0/classic/ckeditor.js"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const uploadUrl = "/ckeditor-upload/";
+    const totalForms = document.getElementById("id_contents-TOTAL_FORMS");
+    const container = document.getElementById("formset-container");
+    const addMoreBtn = document.getElementById("add-more");
+    const emptyTemplate = document.getElementById("empty-form-template").innerHTML;
+
+    // Init CKEditor on existing rich-text fields
+    document.querySelectorAll("textarea.rich-text").forEach((textarea) => {
+      ClassicEditor.create(textarea, {
+        toolbar: [
+          'heading', '|', 'bold', 'italic', 'link',
+          'bulletedList', 'numberedList', '|', 'blockQuote',
+          'undo', 'redo'
+        ],
+        simpleUpload: {
+          uploadUrl: uploadUrl,
+          headers: {
+            'X-CSRFToken': '{{ csrf_token }}'
+          }
+        }
+      }).catch(error => console.error(error));
+    });
+
+    // Dynamic add form
+    addMoreBtn.addEventListener("click", function () {
+      const formCount = parseInt(totalForms.value);
+      const newFormHtml = emptyTemplate.replace(/__prefix__/g, formCount);
+      const tempDiv = document.createElement("div");
+      tempDiv.innerHTML = newFormHtml;
+      container.appendChild(tempDiv.firstElementChild);
+      totalForms.value = formCount + 1;
+
+      // Init CKEditor on newly added textarea
+      const newTextarea = container.querySelectorAll("textarea.rich-text")[formCount];
+      ClassicEditor.create(newTextarea, {
+        toolbar: [
+          'heading', '|', 'bold', 'italic', 'link',
+          'bulletedList', 'numberedList', '|', 'blockQuote',
+          'undo', 'redo'
+        ],
+        simpleUpload: {
+          uploadUrl: uploadUrl,
+          headers: {
+            'X-CSRFToken': '{{ csrf_token }}'
+          }
+        }
+      }).catch(error => console.error(error));
+    });
+  });
+</script>
+{% endblock %}

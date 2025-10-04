@@ -1,0 +1,12 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>Confirm Delete Quiz</h2>
+<div class="alert alert-warning">
+    Are you sure you want to delete the quiz "<strong>{{ quiz.title }}</strong>"?
+</div>
+<form method="post">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger">Yes, Delete</button>
+    <a href="{% url 'teacher_quiz_list' %}" class="btn btn-secondary">Cancel</a>
+</form>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>Reset Assessment Submissions for a User</h2>
+
+<form method="post" class="card p-4 mb-4">
+    {% csrf_token %}
+    <div class="mb-3">
+        <label for="user_id" class="form-label">Select User:</label>
+        <select name="user_id" id="user_id" class="form-select" required>
+            <option value="">-- Select User --</option>
+            {% for user in users %}
+                <option value="{{ user.id }}">{{ user.username }} ({{ user.get_full_name }})</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="mb-3">
+        <label for="assessment_id" class="form-label">Select Assessment:</label>
+        <select name="assessment_id" id="assessment_id" class="form-select" required>
+            <option value="">-- Select Assessment --</option>
+            {% for assessment in assessments %}
+                <option value="{{ assessment.id }}">{{ assessment.title }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <button type="submit" class="btn btn-danger">Reset Submissions & Session</button>
+</form>
+
+{% if messages %}
+    <ul class="list-unstyled">
+        {% for message in messages %}
+            <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+        {% endfor %}
+    </ul>
+{% endif %}
+{% endblock %}

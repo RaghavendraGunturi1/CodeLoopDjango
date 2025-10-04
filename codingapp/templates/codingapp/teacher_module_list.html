@@ -1,0 +1,24 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>Modules</h2>
+<a href="{% url 'teacher_add_module' %}" class="btn btn-primary mb-2">Add Module</a>
+<table class="table">
+  <thead>
+    <tr><th>Title</th><th>Description</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+    {% for module in modules %}
+    <tr>
+      <td>{{ module.title }}</td>
+      <td>{{ module.description }}</td>
+      <td>
+        <a href="{% url 'teacher_edit_module' module.id %}" class="btn btn-sm btn-warning">Edit</a>
+        <a href="{% url 'teacher_delete_module' module.id %}" class="btn btn-sm btn-danger">Delete</a>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="3">No modules found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

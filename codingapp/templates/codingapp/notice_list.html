@@ -1,0 +1,21 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>Notice Board</h2>
+<ul class="list-group">
+  {% for n in notices %}
+    <li class="list-group-item d-flex align-items-center">
+      <a href="{% url 'notice_detail' n.id %}">
+        {% if n.id in unread_ids %}
+          <span class="badge bg-danger me-2">New</span>
+        {% endif %}
+        <strong>{{ n.title }}</strong> - <span class="text-muted">{{ n.created_at|date:"d M Y, H:i" }}</span>
+      </a>
+      {% if n.attachment %}
+            <a href="{{ n.attachment.url }}" target="_blank" class="ms-auto btn btn-sm btn-outline-secondary">View</a>
+      {% endif %}
+    </li>
+  {% empty %}
+    <li class="list-group-item">No notices found.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

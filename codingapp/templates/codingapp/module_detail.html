@@ -1,0 +1,94 @@
+{% extends "codingapp/base.html" %}
+
+{% block title %}
+    {{ module.title }} - Coding Platform
+{% endblock %}
+
+{% block content %}
+<div class="card p-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>{{ module.title }}</h2>
+        {% if user.is_staff %}
+            <div class="d-flex gap-2">
+                <a href="{% url 'edit_module' module.id %}" class="btn btn-warning btn-sm">Edit</a>
+                <a href="{% url 'delete_module' module.id %}" class="btn btn-danger btn-sm">Delete</a>
+            </div>
+        {% endif %}
+    </div>
+    <p>{{ module.description|default:"No description available." }}</p>
+
+    {% if user.is_staff %}
+        <a href="{% url 'add_question' module.id %}" class="btn btn-primary mb-4">Add Question</a>
+    {% endif %}
+
+    <h3>Questions</h3>
+    <ul class="list-group mb-4">
+        {% for question in module.questions.all %}
+            <li class="list-group-item">
+                <a href="{% url 'question_detail' question.id %}" class="text-decoration-none">{{ question.title }}</a>
+            </li>
+        {% empty %}
+            <li class="list-group-item text-muted">No questions available.</li>
+        {% endfor %}
+    </ul>
+
+    <h4 class="text-center mb-3">Your Progress</h4>
+    <div class="chart-container mx-auto mb-4" style="max-width: 300px; height: 300px;">
+        <canvas id="progressChart"></canvas>
+    </div>
+
+    {% if not user.is_staff %}
+        {% if completed_count == total_count %}
+            {% if not is_completed %}
+                <form method="post" action="{% url 'mark_module_completed' module.id %}" class="text-center mt-3">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-success">Mark as Completed</button>
+                </form>
+            {% else %}
+                <div class="alert alert-success text-center mt-3">
+                    ✅ You have completed this module.
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="alert alert-info text-center mt-3">
+                Complete all questions to unlock the "Mark as Completed" button.
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
+
+<!-- JSON-safe variables -->
+{{ completed_count|json_script:"completedCount" }}
+{{ total_count|json_script:"totalCount" }}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const completed = JSON.parse(document.getElementById("completedCount").textContent);
+    const total = JSON.parse(document.getElementById("totalCount").textContent);
+    const remaining = total - completed;
+
+    const ctx = document.getElementById("progressChart").getContext("2d");
+    const progressChart = new Chart(ctx, {
+        type: "pie",
+        data: {
+            labels: ["Completed", "Remaining"],
+            datasets: [{
+                data: [completed, remaining],
+                backgroundColor: ["#4CAF50", "#F44336"],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: "bottom"
+                }
+            }
+        }
+    });
+</script>
+{% endblock %}

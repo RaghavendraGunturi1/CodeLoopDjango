@@ -1,0 +1,35 @@
+{% extends "codingapp/base.html" %}
+{% block title %}{{ assessment.title }} - Assessment{% endblock %}
+
+{% block content %}
+<div class="card p-4">
+    <h2>{{ assessment.title }}</h2>
+    
+    <p>{{ assessment.description }}</p>
+    <p><strong>Time:</strong> {{ assessment.start_time }} to {{ assessment.end_time }}</p>
+    
+
+    <h4>Questions</h4>
+    
+    {% if questions %}
+        <ul class="list-group">
+        {% for q in questions %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ q.question.title }}
+                <a href="{% url 'submit_assessment_code' assessment.id q.question.id %}" class="btn btn-sm btn-primary">Start</a>
+            </li>
+        {% endfor %}
+
+        </ul>
+        <a href="{% url 'assessment_leaderboard' assessment.id %}" class="btn btn-outline-primary mt-3">
+            View Leaderboard
+        </a>
+        
+        <a href="{% url 'quiz_leaderboard' assessment.id %}" class="btn btn-outline-primary mt-3">
+            View Quiz Leaderboard
+        </a>
+    {% else %}
+        <p class="text-muted">No questions available for this assessment.</p>
+    {% endif %}
+</div>
+{% endblock %}

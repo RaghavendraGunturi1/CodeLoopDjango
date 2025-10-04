@@ -1,0 +1,23 @@
+{% extends "codingapp/base.html" %}
+
+{% block title %}
+    All Questions - Coding Platform
+{% endblock %}
+
+{% block content %}
+    <div class="card p-4">
+        <h2>All Coding Questions</h2>
+        <ul class="list-group">
+            {% for question in questions %}
+                <li class="list-group-item">
+                    <a href="{% url 'question_detail' question.pk %}" class="text-decoration-none">{{ question.title }}</a>
+                    {% if question.module %}
+                        <small class="text-muted"> - {{ question.module.title }}</small>
+                    {% endif %}
+                </li>
+            {% empty %}
+                <li class="list-group-item text-muted">No questions available.</li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endblock %}

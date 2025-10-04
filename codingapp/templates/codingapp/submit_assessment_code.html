@@ -1,0 +1,168 @@
+{% extends "codingapp/base.html" %}
+
+{% block title %}Submit Code - {{ question.title }}{% endblock %}
+
+{% block content %}
+<div class="card p-4">
+    <h3>{{ question.title }}</h3>
+    <p><strong>Assessment:</strong> {{ assessment.title }}</p>
+        <p>{{ question.description|linebreaksbr }}</p>
+
+    <form method="POST">
+        {% csrf_token %}
+        <div class="mb-3">
+            <strong>Time Left:</strong> <span id="timer" class="text-danger fw-bold"></span>
+        </div>
+
+        <div class="mb-3">
+            <label for="language">Language:</label>
+            <select name="language" id="language" class="form-select" style="max-width: 200px;" {% if read_only %}disabled{% endif %}>
+                {% for lang in supported_languages %}
+                    <option value="{{ lang }}" {% if lang == selected_language %}selected{% endif %}>{{ lang|capfirst }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label for="code">Your Code:</label>
+            <textarea id="code" name="code" style="display: none;">{{ code }}</textarea>
+        </div>
+
+        {% if not read_only and remaining_seconds > 0 %}
+            <button type="submit" class="btn btn-primary">Submit Code</button>
+        {% elif read_only %}
+            <div class="alert alert-success mt-3">✅ You've already solved this question.</div>
+        {% else %}
+            <div class="alert alert-warning mt-3">⏰ Time is up. You can no longer submit code, but you can still view it.</div>
+        {% endif %}
+
+    </form>
+
+    {% if results %}
+        <hr>
+        <h5>Test Case Results</h5>
+        <ul class="list-group">
+            {% for result in results %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>Input:</strong> <pre style="display: inline;">{{ result.input }}</pre><br>
+                        <strong>Expected:</strong>
+                        <pre style="display: inline;">
+                            {% for line in result.expected_output %}
+                                {{ line }}{% if not forloop.last %}{{"\n"}}{% endif %}
+                            {% endfor %}
+                        </pre><br>
+                        <strong>Output:</strong>
+                        <pre style="display: inline;">
+                            {% for line in result.actual_output %}
+                                {{ line }}{% if not forloop.last %}{{"\n"}}{% endif %}
+                            {% endfor %}
+                        </pre>
+                        {% if result.error_message %}
+                            <div class="text-danger"><strong>Error:</strong> {{ result.error_message }}</div>
+                        {% endif %}
+                    </div>
+                    <span class="badge {% if result.status == 'Accepted' %}bg-success{% else %}bg-danger{% endif %}">
+                        {{ result.status }}
+                    </span>
+                </li>
+            {% endfor %}
+        </ul>
+        <div class="mt-3">
+            <strong>Score:</strong> {{ score }}/{{ results|length }}
+        </div>
+    {% endif %}
+
+    {% if next_question %}
+        <div class="mt-4 text-end">
+            <a href="{% url 'submit_assessment_code' assessment.id next_question.id %}" class="btn btn-outline-success">
+                Next Question »
+            </a>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // ⏳ Timer countdown using `end_time`
+    const endTime = new Date("{{ end_time|escapejs }}").getTime();
+    const timerElement = document.getElementById("timer");
+
+    function updateTimer() {
+        const now = new Date().getTime();
+        let timeLeft = Math.floor((endTime - now) / 1000);  // in seconds
+
+        if (timeLeft <= 0) {
+            timerElement.textContent = "00:00";
+            clearInterval(timerInterval);
+
+            document.querySelectorAll("textarea, select, button").forEach(el => el.disabled = true);
+            if (typeof editor !== 'undefined') {
+                editor.setOption("readOnly", true);
+            }
+
+            const btn = document.querySelector("button[type='submit']");
+            if (btn) btn.style.display = "none";
+
+            alert("⏰ Time's up! The editor is now locked.");
+            return;
+        }
+
+        const minutes = Math.floor(timeLeft / 60);
+        const seconds = timeLeft % 60;
+        timerElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    const timerInterval = setInterval(updateTimer, 1000);
+    updateTimer(); // call immediately
+</script>
+
+<script>
+    // 🧠 CodeMirror setup with Dracula theme
+    const codeTextarea = document.getElementById("code");
+    const langSelect = document.getElementById("language");
+    const readOnlyMode = "{{ read_only|yesno:'true,false'|lower }}" === "true"; // This line works IF it renders as true/false (no quotes)
+    const languageModes = {
+        python: "python",
+        javascript: "javascript",
+        java: "text/x-java",
+        c: "text/x-csrc",
+        cpp: "text/x-c++src"
+    };
+
+    const editor = CodeMirror.fromTextArea(codeTextarea, {
+        lineNumbers: true,
+        matchBrackets: true,
+        autoCloseBrackets: true,
+        theme: "dracula",
+        mode: languageModes[langSelect.value] || "python",
+        readOnly: readOnlyMode
+    });
+
+    if (!readOnlyMode) {
+        langSelect.addEventListener("change", function () {
+            const mode = languageModes[this.value] || "python";
+            editor.setOption("mode", mode);
+        });
+    }
+</script>
+<script>
+    // Ensure CodeMirror content is synced with hidden textarea before form submission
+    const form = document.querySelector("form");
+    form.addEventListener("submit", function (e) {
+        editor.save();  // Copies content from CodeMirror into <textarea>
+        if (!editor.getValue().trim()) {
+            e.preventDefault();
+            alert("Code cannot be empty!");
+        }
+    });
+</script>
+
+{% endblock %}
+
+{% block extra_css %}
+    <style>
+        .CodeMirror { height: 400px; border: 1px solid #ddd; }
+    </style>
+{% endblock %}

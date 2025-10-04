@@ -1,0 +1,19 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>Quiz Result: {{ submission.quiz.title }}</h2>
+<p>Score: {{ submission.score }} / {{ submission.quiz.questions.count }}</p>
+<table class="table">
+    <thead>
+        <tr><th>Question</th><th>Your Answer</th><th>Correct Answer</th></tr>
+    </thead>
+    <tbody>
+        {% for answer in answers %}
+        <tr>
+            <td>{{ answer.question.title }}</td>
+            <td>{{ answer.selected_option }}</td>
+            <td>{{ answer.question.correct_answer }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

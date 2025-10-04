@@ -1,0 +1,10 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>Delete Assessment</h2>
+<p>Are you sure you want to delete the assessment "{{ assessment.title }}"?</p>
+<form method="post">
+  {% csrf_token %}
+  <button type="submit" class="btn btn-danger">Delete</button>
+  <a href="{% url 'teacher_assessment_list' %}" class="btn btn-secondary">Cancel</a>
+</form>
+{% endblock %}

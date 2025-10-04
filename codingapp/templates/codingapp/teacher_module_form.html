@@ -1,0 +1,80 @@
+{% extends "codingapp/base.html" %}
+
+{% block title %}
+    {% if form.instance.pk %}Edit Module{% else %}Add Module{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="card p-4 mx-auto" style="max-width: 900px;">
+    <h2>{% if form.instance.pk %}Edit Module{% else %}Add Module{% endif %}</h2>
+    
+    <!-- Display form errors if any -->
+    {% if form.errors %}
+        <div class="alert alert-danger" role="alert">
+            <ul>
+                {% for field in form %}
+                    {% for error in field.errors %}
+                        <li>{{ field.label }}: {{ error }}</li>
+                    {% endfor %}
+                {% endfor %}
+                {% for error in form.non_field_errors %}
+                    <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+    {% if formset.non_form_errors %}
+        <div class="alert alert-danger" role="alert">
+            <ul>
+                {% for error in formset.non_form_errors %}
+                    <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    <form method="post" id="module-form">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="{{ form.title.id_for_label }}" class="form-label">{{ form.title.label }}</label>
+            {{ form.title }}
+        </div>
+        <div class="mb-3">
+            <label for="{{ form.description.id_for_label }}" class="form-label">{{ form.description.label }}</label>
+            {{ form.description }}
+        </div>
+
+        {% if formset %}
+        <hr>
+        <h4 class="mt-4">Questions in this Module</h4>
+        {{ formset.management_form }}
+        {% for question_form in formset %}
+            <div class="card card-body mb-3">
+                <div class="mb-2">
+                    <label class="form-label">{{ question_form.title.label }}</label>
+                    {{ question_form.title }}
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">{{ question_form.description.label }}</label>
+                    {{ question_form.description }}
+                </div>
+                {% if question_form.instance.pk %}
+                    <a href="{% url 'question_detail' question_form.instance.pk %}" class="small">Preview Question</a>
+                {% endif %}
+                {% if formset.can_delete %}
+                    <div class="form-check mt-2">
+                        {{ question_form.DELETE }}
+                        <label class="form-check-label">Delete this question</label>
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+        {% endif %}
+
+        <div class="d-flex gap-2 mt-3">
+            <button type="submit" class="btn btn-success">Save</button>
+            <a href="{% url 'module_list' %}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends 'codingapp/base.html' %}
+{% load static %}
+{% block content %}
+
+<h2>Bulk MCQ Upload</h2>
+<form method="post" enctype="multipart/form-data" class="mb-4">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit" class="btn btn-primary">Upload</button>
+</form>
+<p>
+  <strong>Excel format required:</strong><br>
+  Columns: <code>Question Text</code>, <code>Option1</code>, <code>Option2</code>, <code>Option3</code>, <code>Option4</code>, <code>Correct Answer</code>, <code>Description</code>
+</p>
+<p><a href="{% static 'templates/sample_mcq_upload.xlsx' %}">Download sample template</a></p>
+
+{% if result %}
+  <div class="mt-4">
+    <h4>Upload Summary</h4>
+    <ul>
+      <li>Questions created: <strong>{{ result.created }}</strong></li>
+      <li>Duplicates skipped: <strong>{{ result.skipped }}</strong></li>
+      <li>Errors: <strong>{{ result.errors|length }}</strong></li>
+    </ul>
+    {% if result.errors %}
+      <h5>Error Details:</h5>
+      <ul>
+        {% for error in result.errors %}
+          <li>{{ error }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

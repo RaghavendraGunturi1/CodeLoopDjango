@@ -1,0 +1,41 @@
+{% extends "admin/change_form.html" %}
+
+{% block field_sets %}
+    <!-- Marker to confirm template is loaded -->
+    <div style="background: #e0e0e0; padding: 10px; margin: 10px 0;">
+        <strong>Custom Template Loaded:</strong> Question Change Form
+    </div>
+    {{ block.super }}
+    {% if test_case_formset %}
+        <fieldset class="module aligned">
+            <h2>Test Cases</h2>
+            {{ test_case_formset.management_form }}
+            {% for test_case_form in test_case_formset.forms %}
+                <div class="form-row">
+                    {{ test_case_form.non_field_errors }}
+                    {{ test_case_form.errors }}
+                    <div class="fieldBox">
+                        {{ test_case_form.input.label_tag }}
+                        {{ test_case_form.input }}
+                        {{ test_case_form.input.errors }}
+                    </div>
+                    <div class="fieldBox">
+                        {{ test_case_form.expected_output.label_tag }}
+                        {{ test_case_form.expected_output }}
+                        {{ test_case_form.expected_output.errors }}
+                    </div>
+                    {% if test_case_formset.can_delete %}
+                        <div class="fieldBox">
+                            <label>Delete Test Case:</label>
+                            {{ test_case_form.DELETE }}
+                        </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </fieldset>
+    {% else %}
+        <div style="background: #ffcccc; padding: 10px; margin: 10px 0;">
+            <strong>Error:</strong> Test case formset not available in context.
+        </div>
+    {% endif %}
+{% endblock %}

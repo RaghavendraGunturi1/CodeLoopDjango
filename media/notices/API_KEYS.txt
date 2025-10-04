@@ -1,0 +1,6 @@
+WOLFRAM_APP_ID = "E26PKJ-JK2326YYWG"
+WEATHER_API_KEY = "da941731c65815da2387566c4699895d"
+NEWS_API_KEY = "YOUR_NEWSAPI_KEY"
+ELEVENLABS_API_KEY = "sk_6ef9faefb7b598f43b1589dbdcc7eba3cebc69419eca78d6"  # Add your ElevenLabs API key
+WEATHER_BASE_URL = "http://api.openweathermap.org/data/2.5/weather"
+NEWS_BASE_URL = "https://newsapi.org/v2/top-headlines"

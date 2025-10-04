@@ -1,0 +1,29 @@
+
+{% extends 'codingapp/base.html' %}
+{% load static %}
+{% block content %}
+<h2>Bulk User Upload</h2>
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  <label>Upload Excel file:</label>
+  <input type="file" name="excel_file" accept=".xlsx,.xls" required>
+  <button type="submit" class="btn btn-primary mt-2">Upload</button>
+</form>
+<p><a href="{% static 'templates/sample_user_upload.xlsx' %}">Download sample template</a></p>
+{% if result %}
+  <h3>Upload Summary</h3>
+  <ul>
+    <li>Users created: {{ result.created }}</li>
+    <li>Skipped (duplicate): {{ result.skipped }}</li>
+    <li>Errors: {{ result.errors|length }}</li>
+  </ul>
+  {% if result.errors %}
+    <h4>Error Details</h4>
+    <ul>
+      {% for err in result.errors %}
+        <li>{{ err }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endif %}
+{% endblock %}

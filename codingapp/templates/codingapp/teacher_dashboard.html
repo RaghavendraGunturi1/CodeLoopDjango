@@ -1,0 +1,10 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>Teacher Dashboard</h2>
+<ul>
+  <li><a href="{% url 'teacher_module_list' %}">Manage Modules</a></li>
+  <li><a href="{% url 'teacher_question_list' %}">Manage Questions</a></li>
+  <li><a href="{% url 'teacher_assessment_list' %}">Manage Assessments</a></li>
+  <li><a href="{% url 'teacher_group_list' %}">Manage Groups</a></li>
+</ul>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "codingapp/base.html" %}
+{% block title %}Register{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-8 col-lg-6">
+    <div class="card p-4 shadow border-0" data-aos="zoom-in">
+      <div class="text-center mb-3">
+        <i class="bi bi-person-plus display-4 text-primary"></i>
+        <h2 class="mt-2 mb-0">Create Your Account</h2>
+        <p class="text-muted mb-0">Join Coding Platform and start your journey!</p>
+      </div>
+      {% if form.errors %}
+        <div class="alert alert-danger">
+          <strong>Please correct the errors below:</strong>
+          <ul class="mb-0">
+            {% for field in form %}
+              {% for error in field.errors %}
+                <li>{{ field.label }}: {{ error }}</li>
+              {% endfor %}
+            {% endfor %}
+            {% for error in form.non_field_errors %}
+              <li>{{ error }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+      <form method="post" enctype="multipart/form-data" autocomplete="off">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit" class="btn btn-success btn-animate w-100 mt-2">
+          <i class="bi bi-person-check"></i> Register
+        </button>
+      </form>
+      <div class="text-center mt-3">
+        <small class="text-muted">Already have an account?
+          <a href="{% url 'login' %}">Login here</a>
+        </small>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

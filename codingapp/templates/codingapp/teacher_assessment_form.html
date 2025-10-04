@@ -1,0 +1,10 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>{{ action }} Assessment</h2>
+<form method="post">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit" class="btn btn-success">{{ action }}</button>
+  <a href="{% url 'teacher_assessment_list' %}" class="btn btn-secondary">Cancel</a>
+</form>
+{% endblock %}

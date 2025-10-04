@@ -1,0 +1,95 @@
+{% extends 'codingapp/base.html' %}
+
+{% block content %}
+<h2>Performance Details: {{ student.username }}</h2>
+
+<h4 class="mt-4">Coding Submissions</h4>
+<table class="table table-bordered table-striped">
+  <thead>
+    <tr><th>Question</th><th>Status</th><th>Submitted At</th></tr>
+  </thead>
+  <tbody>
+    {% for s in coding_submissions %}
+      <tr>
+        <td>{{ s.question.title }}</td>
+        <td class="{% if s.status == 'Accepted' %}text-success{% else %}text-danger{% endif %}">{{ s.status }}</td>
+        <td>{{ s.submitted_at }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="3">No submissions</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h4 class="mt-4">Quiz Submissions</h4>
+<table class="table table-bordered table-striped">
+  <thead>
+    <tr><th>Quiz</th><th>Score</th><th>Submitted At</th></tr>
+  </thead>
+  <tbody>
+    {% for q in quiz_submissions %}
+      <tr>
+        <td>{{ q.quiz.title }}</td>
+        <td>{{ q.score }}</td>
+        <td>{{ q.submitted_at }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="3">No quizzes</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if module_progress %}
+  <h4 class="mt-5 mb-3">Module Completion Overview</h4>
+  <div class="row">
+    {% for module in module_progress %}
+      <div class="col-md-4 mb-4">
+        <div class="card h-100 p-3 text-center">
+          <h5>{{ module.module_title }}</h5>
+          <canvas id="moduleChart{{ forloop.counter }}"></canvas>
+          <script>
+            document.addEventListener("DOMContentLoaded", function () {
+              const canvas = document.getElementById("moduleChart{{ forloop.counter }}");
+              const ctx = canvas.getContext("2d");
+
+              // Adjust for device pixel ratio for sharpness
+              const dpr = window.devicePixelRatio || 1;
+              const logicalSize = 200;
+              canvas.width = logicalSize * dpr;
+              canvas.height = logicalSize * dpr;
+              canvas.style.width = logicalSize + "px";
+              canvas.style.height = logicalSize + "px";
+              ctx.scale(dpr, dpr);
+
+              new Chart(ctx, {
+                type: "pie",
+                data: {
+                  labels: ["Completed", "Remaining"],
+                  datasets: [{
+                    data: [
+                      parseInt("{{ module.completed|default:'0' }}"),
+                      parseInt("{{ module.remaining|default:'0' }}")
+                    ],
+                    backgroundColor: ["#28a745", "#dc3545"]
+                  }]
+                },
+                options: {
+                  responsive: false,
+                  maintainAspectRatio: false,
+                  plugins: {
+                    legend: { position: 'bottom' }
+                  }
+                }
+              });
+            });
+          </script>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}

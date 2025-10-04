@@ -1,0 +1,14 @@
+{% extends 'codingapp/base.html' %}
+{% block title %}Add Note{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="mb-4">Upload Note</h2>
+  <form method="post" enctype="multipart/form-data" class="card p-4 shadow-sm">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn btn-success">
+      <i class="bi bi-upload"></i> Upload
+    </button>
+  </form>
+</div>
+{% endblock %}

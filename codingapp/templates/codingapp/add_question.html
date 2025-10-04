@@ -1,0 +1,100 @@
+{% extends "codingapp/base.html" %}
+{% block title %}Add Question – {{ module.title }}{% endblock %}
+{% load widget_tweaks %}
+
+{% block content %}
+<div class="card shadow-sm mx-auto" style="max-width: 720px;">
+  <div class="card-body">
+    <h3 class="card-title mb-4">Add a New Question to <em>{{ module.title }}</em></h3>
+
+    {% if form.errors or formset.non_form_errors %}
+      <div class="alert alert-danger">
+        <ul class="mb-0">
+          {% for field in form %}
+            {% for error in field.errors %}
+              <li><strong>{{ field.label }}</strong>: {{ error }}</li>
+            {% endfor %}
+          {% endfor %}
+          {% for error in form.non_field_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+          {% for error in formset.non_form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <div class="form-floating mb-3">
+        {{ form.title|add_class:"form-control" }}
+        <label for="{{ form.title.id_for_label }}">{{ form.title.label }}</label>
+      </div>
+      <div class="mb-3">
+        <label for="{{ form.description.id_for_label }}" class="form-label">{{ form.description.label }}</label>
+        {{ form.description|add_class:"form-control" }}
+      </div>
+      <div class="mb-3">
+        <label for="{{ form.question_type.id_for_label }}" class="form-label">{{ form.question_type.label }}</label>
+        {{ form.question_type|add_class:"form-select" }}
+      </div>
+
+      {# Coding fields (Test Cases Formset) #}
+      <div id="coding_fields" style="display:none;">
+        <label class="form-label">Test Cases</label>
+        <div id="testcase-formset">
+          {{ formset.management_form }}
+          {% for form_tc in formset %}
+            <div class="mb-2 p-2 border rounded">
+              {{ form_tc.input.label_tag }} {{ form_tc.input|add_class:"form-control mb-1" }}
+              {{ form_tc.expected_output.label_tag }} {{ form_tc.expected_output|add_class:"form-control" }}
+              {% if formset.can_delete %}
+                <div class="form-check mt-1">
+                  {{ form_tc.DELETE }} <label class="form-check-label">Remove this case</label>
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+        <button type="button" id="add-testcase-btn" class="btn btn-sm btn-outline-secondary mb-3">Add Another Test Case</button>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary">Save Question</button>
+        <a href="{% url 'module_detail' module.id %}" class="btn btn-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function toggleFields() {
+    var qtype = document.getElementById("id_question_type").value;
+    document.getElementById("coding_fields").style.display = (qtype === "coding") ? "block" : "none";
+}
+document.addEventListener("DOMContentLoaded", function() {
+    var qtypeField = document.getElementById("id_question_type");
+    if (qtypeField) {
+        qtypeField.addEventListener("change", toggleFields);
+        toggleFields(); // Initial call
+    }
+    document.getElementById('add-testcase-btn').onclick = function(e) {
+      e.preventDefault();
+      let formsetDiv = document.getElementById('testcase-formset');
+      let totalForms = document.querySelector('[name="testcases-TOTAL_FORMS"]');
+      let idx = parseInt(totalForms.value, 10);
+      let emptyRow = `
+        <div class="mb-2 p-2 border rounded">
+          <label for="id_testcases-${idx}-input">Test Case Input</label>
+          <textarea name="testcases-${idx}-input" rows="1" class="form-control mb-1" required></textarea>
+          <label for="id_testcases-${idx}-expected_output">Expected Output (one per line)</label>
+          <textarea name="testcases-${idx}-expected_output" rows="2" class="form-control" required></textarea>
+          <input type="checkbox" name="testcases-${idx}-DELETE" id="id_testcases-${idx}-DELETE" style="display:none;">
+        </div>`;
+      formsetDiv.insertAdjacentHTML('beforeend', emptyRow);
+      totalForms.value = idx + 1;
+    }
+});
+</script>
+{% endblock %}

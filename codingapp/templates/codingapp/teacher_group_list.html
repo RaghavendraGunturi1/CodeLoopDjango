@@ -1,0 +1,28 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>Groups</h2>
+<a href="{% url 'teacher_add_group' %}" class="btn btn-primary mb-2">Add Group</a>
+<table class="table">
+  <thead>
+    <tr><th>Name</th><th>Students</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+    {% for group in groups %}
+    <tr>
+      <td>{{ group.name }}</td>
+      <td>
+        {% for student in group.students.all %}
+          {{ student.username }}{% if not forloop.last %}, {% endif %}
+        {% endfor %}
+      </td>
+      <td>
+        <a href="{% url 'teacher_edit_group' group.id %}" class="btn btn-sm btn-warning">Edit</a>
+        <a href="{% url 'teacher_delete_group' group.id %}" class="btn btn-sm btn-danger">Delete</a>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="3">No groups found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

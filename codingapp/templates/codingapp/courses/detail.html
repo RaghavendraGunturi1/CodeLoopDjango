@@ -1,0 +1,140 @@
+{% extends 'codingapp/base.html' %}
+{% load static %}
+{% load youtube_filters %}
+{% block content %}
+
+<h2>{{ course.title }} <span class="badge bg-secondary">{{ course.difficulty }}</span></h2>
+<p>{{ course.description }}</p>
+<p><strong>Time to Complete:</strong> {{ course.time_to_complete }}</p>
+<p><strong>Prerequisites:</strong> {{ course.prerequisites }}</p>
+
+<hr>
+<h4>Course Content</h4>
+<ol>
+  {% for c in course.contents.all %}
+    <li class="mb-5">
+      <h5 class="fw-bold">{{ c.title }}</h5>
+
+      {% if c.video_url %}
+        <div class="ratio ratio-16x9 mb-2">
+          <iframe 
+            src="https://www.youtube.com/embed/{{ c.video_url|youtube_id }}" 
+            title="{{ c.title }}" 
+            allowfullscreen 
+            class="w-100"
+            style="min-height: 315px;">
+          </iframe>
+        </div>
+      {% endif %}
+
+      <div class="mb-3">{{ c.content|safe }}</div>
+
+      <details class="mb-4">
+        <summary class="btn btn-outline-secondary mb-2">💻 Try Code Yourself</summary>
+        <form class="code-form mb-3" data-content-id="{{ c.id }}">
+          <div class="mb-2">
+            <label for="language-select-{{ forloop.counter }}"><strong>Select Language:</strong></label>
+            <select name="language" id="language-select-{{ forloop.counter }}" class="form-control mb-2">
+              {% for lang in lang_list %}
+                <option value="{{ lang }}">{{ lang|capfirst }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <textarea name="code" id="code-editor-{{ forloop.counter }}"></textarea>
+          <button type="submit" class="btn btn-primary mt-2">Run</button>
+        </form>
+        <pre class="output bg-light border p-3 rounded small mt-2" style="white-space: pre-wrap;">Output will appear here.</pre>
+      </details>
+    </li>
+  {% endfor %}
+</ol>
+
+{% endblock %}
+
+{% block extra_js %}
+<!-- Codemirror -->
+<link rel="stylesheet" href="{% static 'codemirror/lib/codemirror.css' %}">
+<link rel="stylesheet" href="{% static 'codemirror/theme/dracula.css' %}">
+<link rel="stylesheet" href="{% static 'codemirror/addon/hint/show-hint.css' %}">
+<script src="{% static 'codemirror/lib/codemirror.js' %}"></script>
+<script src="{% static 'codemirror/mode/python/python.js' %}"></script>
+<script src="{% static 'codemirror/mode/clike/clike.js' %}"></script>
+<script src="{% static 'codemirror/mode/javascript/javascript.js' %}"></script>
+<script src="{% static 'codemirror/addon/edit/matchbrackets.js' %}"></script>
+<script src="{% static 'codemirror/addon/edit/closebrackets.js' %}"></script>
+<script src="{% static 'codemirror/addon/hint/show-hint.js' %}"></script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const languageModes = {
+    "python": "python",
+    "c": "text/x-csrc",
+    "cpp": "text/x-c++src",
+    "java": "text/x-java",
+    "javascript": "javascript"
+  };
+
+  document.querySelectorAll(".code-form").forEach((form, index) => {
+    const editorId = form.querySelector("textarea").id;
+    const selectId = form.querySelector("select").id;
+
+    const textarea = document.getElementById(editorId);
+    const languageSelect = document.getElementById(selectId);
+
+    const editor = CodeMirror.fromTextArea(textarea, {
+      mode: languageModes[languageSelect.value],
+      theme: "dracula",
+      lineNumbers: true,
+      matchBrackets: true,
+      autoCloseBrackets: true,
+      extraKeys: {"Ctrl-Space": "autocomplete"}
+    });
+
+    editor.setValue("# Write your code here");
+
+    languageSelect.addEventListener("change", function () {
+      editor.setOption("mode", languageModes[this.value]);
+    });
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      const output = form.nextElementSibling;
+      const code = editor.getValue();
+      const language = languageSelect.value;
+
+      output.textContent = "⏳ Running...";
+
+      fetch("{% url 'run_code' %}", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": "{{ csrf_token }}"
+        },
+        body: JSON.stringify({ code, language })
+      })
+      .then(response => response.json())
+      .then(data => {
+        output.textContent = data.error
+          ? `❌ Error:\n${data.error}`
+          : `✅ Output:\n${data.output}`;
+      })
+      .catch(err => {
+        output.textContent = "⚠️ Execution failed.";
+        console.error(err);
+      });
+    });
+  });
+});
+</script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+  .CodeMirror {
+    height: 400px;
+    font-size: 14px;
+    border: 1px solid #ddd;
+  }
+</style>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends 'codingapp/base.html' %}
+{% block content %}
+<h2>Manage My Courses</h2>
+<a href="{% url 'create_course' %}" class="btn btn-success mb-3">➕ Add New Course</a>
+<table class="table table-bordered table-hover">
+  <thead>
+    <tr>
+      <th>Title</th>
+      <th>Difficulty</th>
+      <th>Groups</th>
+      <th>Public?</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for course in courses %}
+    <tr>
+      <td>{{ course.title }}</td>
+      <td>{{ course.difficulty }}</td>
+      <td>
+        {% for g in course.groups.all %}
+          {{ g.name }}{% if not forloop.last %}, {% endif %}
+        {% empty %}
+          —
+        {% endfor %}
+      </td>
+      <td>{{ course.is_public }}</td>
+      <td>
+        <a href="{% url 'edit_course' course.pk %}" class="btn btn-warning btn-sm">Edit</a>
+        <a href="{% url 'delete_course' course.pk %}" class="btn btn-danger btn-sm">Delete</a>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="5">No courses created yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

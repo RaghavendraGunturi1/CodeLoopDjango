@@ -1,0 +1,174 @@
+{% extends 'codingapp/base.html' %}
+{% load form_filters %}
+
+{% block title %}{{ question.title }}{% endblock %}
+
+{% block content %}
+<div class="card p-4">
+    <h2>{{ question.title }}</h2>
+    <p>{{ question.description|linebreaksbr }}</p>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    {% if error %}
+        <h3 class="mt-4 text-danger">Error:</h3>
+        <pre class="bg-light p-3 text-danger">{{ error_output|default:error }}</pre>
+    {% endif %}
+
+    <h3>Submit Your Code:</h3>
+    <form method="post" action="{% url 'question_detail' question.pk %}" id="code-submit-form">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="language-select" class="form-label"><strong>Select Language:</strong></label>
+            <select id="language-select" name="language" class="form-control mb-2">
+                {% for lang in 'python,c,cpp,java,javascript'|split:',' %}
+                    <option value="{{ lang }}" {% if selected_language == lang %}selected{% endif %}>{{ lang|capfirst }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <textarea id="code-editor" name="code">{{ code|escape }}</textarea>
+        <button type="submit" class="btn btn-primary mt-2">Submit</button>
+    </form>
+
+    <hr>
+    <h4 class="mt-4">Try with Custom Input</h4>
+    <div class="mb-3">
+        <label for="custom-input" class="form-label">Enter Custom Input</label>
+        <textarea id="custom-input" rows="4" class="form-control font-monospace" placeholder="Enter your input here..."></textarea>
+    </div>
+    <button id="run-custom-btn" class="btn btn-outline-secondary">Run Code</button>
+
+    <pre id="custom-output" class="bg-light border p-3 mt-3" style="white-space: pre-wrap;"></pre>
+
+    {% if results %}
+        <h3 class="mt-4">Test Case Results:</h3>
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead class="thead-dark">
+                    <tr>
+                        <th>Input</th>
+                        <th>Expected Output</th>
+                        <th>Actual Output</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for result in results %}
+                    <tr>
+                        <td><pre>{{ result.input }}</pre></td>
+                        <td><pre>{% for line in result.expected_output %}{{ line }}{% if not forloop.last %}\n{% endif %}{% endfor %}</pre></td>
+                        <td><pre>{% for line in result.actual_output %}{{ line }}{% if not forloop.last %}\n{% endif %}{% endfor %}</pre></td>
+                        <td class="{% if result.status == 'Accepted' %}text-success{% else %}text-danger{% endif %}">
+                            {{ result.status }}
+                            {% if result.error_message %}
+                                <pre>{{ result.error_message }}</pre>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const languageModes = {
+        "python": "python",
+        "c": "text/x-csrc",
+        "cpp": "text/x-c++src",
+        "java": "text/x-java",
+        "javascript": "javascript"
+    };
+
+    document.addEventListener("DOMContentLoaded", function () {
+        const textarea = document.getElementById("code-editor");
+        const languageSelect = document.getElementById("language-select");
+        const selectedLanguage = "{{ selected_language|escapejs }}";
+
+        const editor = CodeMirror.fromTextArea(textarea, {
+            mode: languageModes[selectedLanguage] || "python",
+            lineNumbers: true,
+            theme: "dracula",
+            indentUnit: 4,
+            matchBrackets: true,
+            autoCloseBrackets: true,
+            extraKeys: { "Ctrl-Space": "autocomplete" }
+        });
+
+        window.editor = editor; // make editor accessible globally
+
+        const initialCodeElement = document.getElementById("initial-code");
+        const initialCode = initialCodeElement ? JSON.parse(initialCodeElement.textContent) : "";
+        editor.setValue(initialCode || "");
+
+        document.querySelector("#code-submit-form").addEventListener("submit", function () {
+            textarea.value = editor.getValue();
+        });
+
+        languageSelect.addEventListener("change", function () {
+            editor.setOption("mode", languageModes[this.value]);
+        });
+
+        // Custom run button logic
+        const runBtn = document.getElementById("run-custom-btn");
+        const outputBox = document.getElementById("custom-output");
+        const customInputBox = document.getElementById("custom-input");
+
+        runBtn.addEventListener("click", () => {
+            const code = editor.getValue();
+            const language = languageSelect.value;
+            const custom_input = customInputBox.value;
+
+            outputBox.textContent = "⏳ Running...";
+
+            fetch("{% url 'run_code' %}", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": "{{ csrf_token }}"
+                },
+                body: JSON.stringify({
+                    code: code,
+                    language: language,
+                    stdin: custom_input
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    outputBox.textContent = `❌ Error:\n${data.error}`;
+                } else {
+                    outputBox.textContent = `✅ Output:\n${data.output}`;
+                }
+            })
+            .catch(err => {
+                outputBox.textContent = "⚠️ Failed to execute code.";
+                console.error(err);
+            });
+        });
+    });
+</script>
+
+<!-- Pass initial code safely -->
+{{ code|json_script:"initial-code" }}
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .CodeMirror {
+        height: 400px;
+        border: 1px solid #ddd;
+    }
+</style>
+{% endblock %}

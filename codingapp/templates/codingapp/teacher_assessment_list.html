@@ -1,0 +1,25 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>Assessments</h2>
+<a href="{% url 'teacher_add_assessment' %}" class="btn btn-primary mb-2">Add Assessment</a>
+<table class="table">
+  <thead>
+    <tr><th>Title</th><th>Start</th><th>End</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+    {% for assessment in assessments %}
+    <tr>
+      <td>{{ assessment.title }}</td>
+      <td>{{ assessment.start_time }}</td>
+      <td>{{ assessment.end_time }}</td>
+      <td>
+        <a href="{% url 'teacher_edit_assessment' assessment.id %}" class="btn btn-sm btn-warning">Edit</a>
+        <a href="{% url 'teacher_delete_assessment' assessment.id %}" class="btn btn-sm btn-danger">Delete</a>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="4">No assessments found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,168 @@
+{% extends "codingapp/base.html" %}
+
+{% block title %}
+    Dashboard - {{ user.username }}
+{% endblock %}
+
+{% block content %}
+<div class="card p-4">
+
+    <!-- User Profile Section -->
+    <div class="d-flex align-items-center mb-4">
+        {% if profile and profile.profile_picture %}
+            <img src="{{ profile.profile_picture.url }}" alt="Profile Picture"
+                 class="rounded-circle me-3" width="80" height="80">
+        {% else %}
+            <img src="/static/default-profile.png" alt="Profile Picture"
+                 class="rounded-circle me-3" width="80" height="80">
+        {% endif %}
+        <div>
+            <h2 class="mb-0">
+                <h2>Welcome, {{ user.first_name }} {{ user.last_name }}!</h2>
+
+            </h2>
+            <p class="mb-1 text-muted">Roll Number: {{ user.username }}</p>
+            <p class="mb-0">Email: {{ user.email|default:"Not provided" }}</p>
+        </div>
+    </div>
+    <!-- End User Profile Section -->
+
+    <h3>Your Past Submissions</h3>
+    {% if user_submissions %}
+    <div class="table-responsive">
+        <table class="table table-bordered">
+            <thead class="thead-dark">
+                <tr>
+                    <th>Submitted At</th>
+                    <th>Question</th>
+                    <th>Language</th>
+                    <th>Code</th>
+                    <th>Status</th>
+                    <th>Output/Error</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for submission in user_submissions %}
+                <tr>
+                    <td>{{ submission.submitted_at|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        <a href="{% url 'question_detail' submission.question.pk %}" class="text-decoration-none">
+                            {{ submission.question.title }}
+                        </a>
+                    </td>
+                    <td>{{ submission.language|capfirst }}</td>
+                    <td>
+                        <pre class="mb-0 text-wrap" style="max-width: 300px;">{{ submission.code|truncatechars:100 }}</pre>
+                    </td>
+                    <td>
+                        {% if submission.status == "Accepted" %}
+                            <span class="badge bg-success">Accepted</span>
+                        {% elif submission.status == "Rejected" %}
+                            <span class="badge bg-danger">Rejected</span>
+                        {% else %}
+                            <span class="badge bg-secondary">{{ submission.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if submission.output %}
+                            <small class="text-muted">{{ submission.output|truncatechars:50 }}</small>
+                        {% elif submission.error %}
+                            <small class="text-danger">{{ submission.error|truncatechars:50 }}</small>
+                        {% else %}
+                            <small class="text-muted">N/A</small>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <p class="text-muted">
+            You haven't made any submissions yet.
+            Start by exploring <a href="{% url 'question_list' %}">available questions</a>.
+        </p>
+    {% endif %}
+</div>
+
+<!-- 📊 Pie Chart -->
+<div class="card p-4 mt-4">
+    <h3 class="text-center mb-3">Submission Status Overview</h3>
+    <div class="d-flex justify-content-center">
+        <div style="max-width: 300px; width: 100%;">
+            <canvas id="submissionStatusChart"></canvas>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const accepted = JSON.parse('{{ accepted_count|default:"0" }}');
+    const rejected = JSON.parse('{{ rejected_count|default:"0" }}');
+    const ctx = document.getElementById('submissionStatusChart').getContext('2d');
+
+    function getThemeColors(theme) {
+        if (theme === 'dark') {
+            return {
+                backgroundColor: ['#00e676', '#ff1744'],
+                borderColor: ['#00c853', '#d50000']
+            };
+        } else {
+            return {
+                backgroundColor: ['#4CAF50', '#F44336'],
+                borderColor: ['#388E3C', '#D32F2F']
+            };
+        }
+    }
+
+    function getCurrentTheme() {
+        return document.documentElement.getAttribute('data-bs-theme') || 'light';
+    }
+
+    let currentColors = getThemeColors(getCurrentTheme());
+
+    const submissionChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: ['Accepted', 'Rejected'],
+            datasets: [{
+                data: [accepted, rejected],
+                backgroundColor: currentColors.backgroundColor,
+                borderColor: currentColors.borderColor,
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: { position: 'bottom' },
+                title: {
+                    display: true,
+                    text: 'Submission Status'
+                }
+            }
+        }
+    });
+
+    // Watch for theme toggle
+    const toggle = document.getElementById('theme-toggle');
+    if (toggle) {
+        toggle.addEventListener('click', () => {
+            setTimeout(() => {
+                const newTheme = getCurrentTheme();
+                const newColors = getThemeColors(newTheme);
+                submissionChart.data.datasets[0].backgroundColor = newColors.backgroundColor;
+                submissionChart.data.datasets[0].borderColor = newColors.borderColor;
+                submissionChart.update();
+            }, 300); // wait for attribute change
+        });
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>Quiz Leaderboard: {{ assessment.title }}</h2>
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Rank</th>
+            <th>User</th>
+            <th>Score</th>
+            <th>Submission Time</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for submission in submissions %}
+        <tr>
+            <td>{{ forloop.counter }}</td>
+            <td>{{ submission.user.get_full_name|default:submission.user.username }}</td>
+            <td>{{ submission.score }}</td>
+            <td>{{ submission.submitted_at }}</td>
+
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="4">No quiz submissions yet.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+<a href="{% url 'assessment_detail' assessment.id %}" class="btn btn-secondary">Back to Assessment</a>
+{% endblock %}
