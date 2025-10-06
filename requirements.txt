@@ -7,3 +7,4 @@ whitenoise
 requests
 openpyxl
 pandas
+Pillow
