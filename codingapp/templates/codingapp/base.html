@@ -286,6 +286,11 @@
                 </a>
               </li>
               <li class="nav-item">
+                  <a class="nav-link {% if '/teacher/quizzes/' in request.path %}active{% endif %}" href="{% url 'teacher_quiz_list' %}">
+                      <i class="bi bi-patch-question me-2"></i>Manage Quizzes
+                  </a>
+              </li>
+              <li class="nav-item">
                 <a class="nav-link {% if request.path == '/bulk-user-upload/' %}active{% endif %}" href="{% url 'bulk_user_upload' %}">
                   <i class="bi bi-upload me-2"></i>Bulk User Upload
                 </a>

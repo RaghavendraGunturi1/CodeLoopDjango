@@ -113,8 +113,4 @@ urlpatterns = [
     path('teacher/student-performance/export/', views.export_student_performance, name='export_student_performance'),
     path('modules/<int:module_id>/mark-completed/', views.mark_module_completed, name='mark_module_completed'),
 
-    path('teacher/quizzes/', views.teacher_quiz_list, name='teacher_quiz_list'),
-    path('teacher/quizzes/create/', views.teacher_quiz_create, name='teacher_quiz_create'),
-    path('teacher/quizzes/<int:quiz_id>/edit/', views.teacher_quiz_edit, name='teacher_quiz_edit'),
-    path('teacher/quizzes/<int:quiz_id>/delete/', views.teacher_quiz_delete, name='teacher_quiz_delete'),
-]
+    ]
