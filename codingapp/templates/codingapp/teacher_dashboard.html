@@ -6,5 +6,7 @@
   <li><a href="{% url 'teacher_question_list' %}">Manage Questions</a></li>
   <li><a href="{% url 'teacher_assessment_list' %}">Manage Assessments</a></li>
   <li><a href="{% url 'teacher_group_list' %}">Manage Groups</a></li>
+  <a href="{% url 'teacher_quiz_list' %}" class="btn btn-info">Manage Quizzes</a>
+        <a href="{% url 'teacher_quiz_create' %}" class="btn btn-primary">Create New Quiz</a>
 </ul>
 {% endblock %}
