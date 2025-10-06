@@ -149,8 +149,6 @@ def register(request):
 
             # FIX: Don't use user.profile → use get_or_create
             profile, _ = UserProfile.objects.get_or_create(user=user)
-            profile.birthdate = form.cleaned_data.get('birthdate')
-            profile.profile_picture = form.cleaned_data.get('profile_picture')
             profile.save()
 
             login(request, user)
@@ -1355,7 +1353,7 @@ def bulk_mcq_upload(request):
                             module=module,
                             title=title,
                             description=description,
-                            question_type="MCQ",
+                            question_type="mcq",
                             options=options,
                             correct_answer=correct_answer,
                         )
