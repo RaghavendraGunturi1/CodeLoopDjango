@@ -148,6 +148,7 @@ class AssessmentSession(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     assessment = models.ForeignKey(Assessment, on_delete=models.CASCADE)
     start_time = models.DateTimeField(null=True, blank=True)
+    end_time = models.DateTimeField(null=True, blank=True)  # <-- ADD THIS LINE
     quiz_submitted = models.BooleanField(default=False)
 
     class Meta:

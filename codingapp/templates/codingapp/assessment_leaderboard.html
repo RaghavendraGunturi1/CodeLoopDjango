@@ -1,35 +1,51 @@
 {% extends "codingapp/base.html" %}
 
-{% block title %}{{ assessment.title }} - Leaderboard{% endblock %}
+{% block title %}Leaderboard - {{ assessment.title }}{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <h2>{{ assessment.title }} - 🏆 Leaderboard</h2>
-    <p class="text-muted">{{ assessment.description }}</p>
+<div class="card p-4">
+    <div class="text-center mb-4">
+        <h2>🏆 Leaderboard</h2>
+        <p class="lead">Showing results for <strong>{{ assessment.title }}</strong></p>
+    </div>
 
-    <table class="table table-bordered table-striped mt-4">
-        <thead>
-            <tr>
-                <th>Rank</th>
-                <th>User</th>
-                <th>Score</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for entry in leaderboard %}
-                <tr>
-                    <td>{{ forloop.counter }}</td>
-                    <td>{{ entry.user__username }}</td>
-                    <td>{{ entry.total_score }}</td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td colspan="3">No submissions yet for this assessment.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
-    <a href="{% url 'assessment_detail' assessment.id %}" class="btn btn-secondary mt-3">&larr; Back to Assessment</a>
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+    <thead class="table-dark">
+        <tr>
+            <th scope="col">Rank</th>
+            <th scope="col">Username</th>
+            <th scope="col">Quiz Score</th>
+            <th scope="col">Coding Score</th>
+            <th scope="col">Total Score</th>
+            <th scope="col">Time Taken</th> </tr>
+    </thead>
+    <tbody>
+        {% for entry in leaderboard %}
+        <tr>
+            <th scope="row">{{ forloop.counter }}</th>
+            <td>{{ entry.username }}</td>
+            <td>{{ entry.quiz_score }}</td>
+            <td>{{ entry.coding_score }}</td>
+            <td><strong>{{ entry.total_score }}</strong></td>
+            <td>
+                {% if entry.time_taken %}
+                    {{ entry.time_taken }}
+                {% else %}
+                    N/A
+                {% endif %}
+            </td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="6" class="text-center">No participants have made submissions for this assessment yet.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+    </div>
+    <div class="mt-4">
+        <a href="{% url 'assessment_list' %}" class="btn btn-secondary">&larr; Back to Assessments</a>
+    </div>
 </div>
 {% endblock %}

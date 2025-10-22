@@ -229,8 +229,8 @@
           </a>
         </li>
         <li class="nav-item mb-2">
-          <a class="nav-link {% if request.path == '/leaderboard/' %}active{% endif %}" href="{% url 'leaderboard' %}">
-            <i class="bi bi-trophy me-2"></i>Leaderboard
+          <a class="nav-link {% if '/assessments/leaderboards' in request.path %}active{% endif %}" href="{% url 'assessment_leaderboard_list' %}">
+            <i class="bi bi-trophy me-2"></i>Leaderboards
           </a>
         </li>
         {% if user.is_staff %}
@@ -259,6 +259,11 @@
               <li class="nav-item">
                 <a class="nav-link {% if request.path == '/teacher/assessments/' %}active{% endif %}" href="{% url 'teacher_assessment_list' %}">
                   <i class="bi bi-check2-square me-2"></i>Manage Assessments
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link {% if request.path == '/reset_submissions/' %}active{% endif %}" href="{% url 'reset_submissions_admin' %}">
+                  <i class="bi bi-arrow-counterclockwise me-2"></i>Reset Assessment
                 </a>
               </li>
               <li><a href="{% url 'manage_courses' %}" class="nav-link {% if '/courses/manage/' in request.path %}active{% endif %}"><i class="bi bi-journal-code me-2"></i>

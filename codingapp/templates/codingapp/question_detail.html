@@ -80,47 +80,62 @@
     {% endif %}
 </div>
 {% endblock %}
-
 {% block extra_js %}
 <script>
     const languageModes = {
-        "python": "python",
-        "c": "text/x-csrc",
-        "cpp": "text/x-c++src",
-        "java": "text/x-java",
-        "javascript": "javascript"
+        "python": "python", "c": "text/x-csrc", "cpp": "text/x-c++src",
+        "java": "text/x-java", "javascript": "javascript"
     };
 
     document.addEventListener("DOMContentLoaded", function () {
         const textarea = document.getElementById("code-editor");
+        const form = document.getElementById("code-submit-form");
+        const submitBtn = form.querySelector("button[type='submit']");
         const languageSelect = document.getElementById("language-select");
-        const selectedLanguage = "{{ selected_language|escapejs }}";
 
         const editor = CodeMirror.fromTextArea(textarea, {
-            mode: languageModes[selectedLanguage] || "python",
+            mode: languageModes[languageSelect.value] || "python",
             lineNumbers: true,
             theme: "dracula",
             indentUnit: 4,
             matchBrackets: true,
-            autoCloseBrackets: true,
+            autoCloseBrackets: true, // Enables auto-completion
             extraKeys: { "Ctrl-Space": "autocomplete" }
         });
 
-        window.editor = editor; // make editor accessible globally
+        // --- THIS IS THE FIX FOR COPY/PASTE ---
+        const editorWrapper = editor.getWrapperElement();
+        editorWrapper.addEventListener('cut', (e) => e.preventDefault());
+        editorWrapper.addEventListener('copy', (e) => e.preventDefault());
+        editorWrapper.addEventListener('paste', (e) => e.preventDefault());
+        
+        window.editor = editor;
 
-        const initialCodeElement = document.getElementById("initial-code");
-        const initialCode = initialCodeElement ? JSON.parse(initialCodeElement.textContent) : "";
-        editor.setValue(initialCode || "");
-
-        document.querySelector("#code-submit-form").addEventListener("submit", function () {
+        // --- THIS IS THE CORRECTED PART ---
+        form.addEventListener("submit", function (e) {
             textarea.value = editor.getValue();
+
+            if (!editor.getValue().trim()) {
+                e.preventDefault(); // Prevent submission if code is empty
+                alert("Code cannot be empty!");
+                return;
+            }
+
+            // Show loading state when form is submitted
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = `
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    Executing...
+                `;
+            }
         });
 
         languageSelect.addEventListener("change", function () {
             editor.setOption("mode", languageModes[this.value]);
         });
 
-        // Custom run button logic
+        // Custom run button logic (no changes needed here)
         const runBtn = document.getElementById("run-custom-btn");
         const outputBox = document.getElementById("custom-output");
         const customInputBox = document.getElementById("custom-input");
@@ -134,15 +149,8 @@
 
             fetch("{% url 'run_code' %}", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-CSRFToken": "{{ csrf_token }}"
-                },
-                body: JSON.stringify({
-                    code: code,
-                    language: language,
-                    stdin: custom_input
-                })
+                headers: { "Content-Type": "application/json", "X-CSRFToken": "{{ csrf_token }}" },
+                body: JSON.stringify({ code: code, language: language, stdin: custom_input })
             })
             .then(res => res.json())
             .then(data => {
@@ -160,7 +168,6 @@
     });
 </script>
 
-<!-- Pass initial code safely -->
 {{ code|json_script:"initial-code" }}
 {% endblock %}
 

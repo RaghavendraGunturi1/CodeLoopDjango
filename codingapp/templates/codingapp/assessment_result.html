@@ -1,0 +1,49 @@
+{% extends 'codingapp/base.html' %}
+
+{% block title %}Assessment Result - {{ assessment.title }}{% endblock %}
+
+{% block content %}
+<div class="card p-4">
+    <div class="text-center">
+        <h2>Assessment Finished!</h2>
+        <p class="lead">Here is a summary of your performance for <strong>{{ assessment.title }}</strong>.</p>
+        {% if request.GET.ended == 'auto' %}
+            <div class="alert alert-danger mt-3">
+                <strong>This assessment was automatically submitted because you switched tabs more than 3 times.</strong>
+            </div>
+        {% endif %}
+        <hr>
+        <h3>Your Total Score: {{ total_score }}</h3>
+    </div>
+
+    <h4 class="mt-4">Submission Details:</h4>
+    <div class="table-responsive">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Question</th>
+                    <th>Language</th>
+                    <th>Your Score</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sub in submissions %}
+                <tr>
+                    <td>{{ sub.question.title }}</td>
+                    <td>{{ sub.language|capfirst }}</td>
+                    <td>{{ sub.score }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="3" class="text-center">You did not make any submissions.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mt-4 text-center">
+        <a href="{% url 'dashboard' %}" class="btn btn-primary">Back to Dashboard</a>
+    </div>
+</div>
+{% endblock %}

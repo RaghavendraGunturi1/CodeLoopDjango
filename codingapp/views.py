@@ -6,10 +6,11 @@ from django.contrib.auth.forms import UserCreationForm
 from django.contrib.admin.views.decorators import staff_member_required
 from django.http import JsonResponse
 from django.contrib import messages
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from django.contrib.auth.models import User
 from django.db.models import Q
+from django.conf import settings
 
 
 
@@ -22,8 +23,9 @@ from .forms import ModuleForm, QuestionForm
 from codingapp import models
 
 # Piston (code execution) API endpoint
-PISTON_API_URL = "https://emkc.org/api/v2/piston/execute"
+#PISTON_API_URL = "https://emkc.org/api/v2/piston/execute"
 #PISTON_API_URL = "http://localhost:2000/api/v2/execute"
+PISTON_API_URL = settings.PISTON_API_URL
 SUPPORTED_LANGUAGES = ["python", "c", "cpp", "java", "javascript"]
 
 logger = logging.getLogger(__name__)
@@ -94,6 +96,7 @@ def execute_code(code, language, test_cases):
                 "error_message": error_message if status in ["Rejected", "Error"] else ""
             })
         except requests.exceptions.RequestException as e:
+            logger.error(f"Piston API request failed: {e}", exc_info=True)
             msg = f"API error: {e}"
             results.append({
                 "input": test.get("input", ""),
@@ -289,7 +292,7 @@ def question_detail(request, pk):
 
                 if solved_count == module_questions.count():
                     from .models import ModuleCompletion  # import at the top if needed
-                    ModuleCompletion.objects.get_or_create(student=request.user, module=q.module)
+                    ModuleCompletion.objects.get_or_create(user=request.user, module=q.module)
             
 
             # ✅ Auto mark module as completed
@@ -302,7 +305,7 @@ def question_detail(request, pk):
                 ).values("question").distinct().count()
 
                 if accepted_count == module_questions.count():
-                    ModuleCompletion.objects.get_or_create(student=request.user, module=q.module)
+                    ModuleCompletion.objects.get_or_create(user=request.user, module=q.module)
 
             request.session[f'code_{pk}'] = code
             request.session[f'language_{pk}'] = lang
@@ -344,7 +347,7 @@ def mark_module_completed(request, module_id):
 
     if total_questions > 0 and completed_questions == total_questions:
         # Only create if not already marked
-        ModuleCompletion.objects.get_or_create(student=request.user, module=module)
+        ModuleCompletion.objects.get_or_create(user=request.user, module=module)
         messages.success(request, "Module marked as completed!")
     else:
         messages.error(request, "You must complete all questions (Accepted) before marking as completed.")
@@ -422,6 +425,7 @@ from .models import Assessment, AssessmentSession, AssessmentQuestion
 @login_required
 def assessment_detail(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
+    # Basic permission and active checks
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
         if not assessment.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
@@ -430,41 +434,65 @@ def assessment_detail(request, assessment_id):
         messages.warning(request, "This assessment is not active.")
         return redirect("assessment_list")
 
+    # Get or create the session
     session, created = AssessmentSession.objects.get_or_create(
         user=request.user,
         assessment=assessment,
         defaults={"start_time": timezone.now()}
     )
-    deadline = session.start_time + timezone.timedelta(minutes=assessment.duration_minutes)
-    remaining_seconds = max(0, int((deadline - timezone.now()).total_seconds()))
 
-    # --- NEW: Check for quiz section ---
+    # --- FIX: Check if the user has already finished the assessment ---
+    if session.end_time:
+        messages.info(request, "You have already completed this assessment.")
+        return redirect('assessment_result', assessment_id=assessment.id)
+
+    # Redirect to the quiz if it exists and hasn't been submitted
     if assessment.quiz and not session.quiz_submitted:
-        # Redirect to the quiz section if quiz not yet submitted
         return redirect('assessment_quiz', assessment_id=assessment.id)
 
-    # Coding questions unlocked only after quiz is submitted (or if no quiz)
-    questions = AssessmentQuestion.objects.filter(assessment=assessment).select_related('question')
-    return render(request, 'codingapp/assessment_detail.html', {
-        "assessment": assessment,
-        "questions": questions,
-        "end_time": deadline.isoformat(),
-        "remaining_seconds": remaining_seconds
-    })
+    # If no quiz or quiz is done, redirect to the first coding question
+    first_question = AssessmentQuestion.objects.filter(assessment=assessment).order_by('order').first()
+    if first_question:
+        return redirect('submit_assessment_code', assessment_id=assessment.id, question_id=first_question.question.id)
+
+    # Fallback if there are no coding questions
+    messages.error(request, "This assessment has no coding questions.")
+    return redirect('assessment_list')
+
 
 @login_required
 def assessment_quiz(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
     session = get_object_or_404(AssessmentSession, user=request.user, assessment=assessment)
     quiz = assessment.quiz
+
     if session.quiz_submitted:
-        # Already done, go to coding section
+        # If the quiz is already done, redirect to the main assessment handler
         return redirect('assessment_detail', assessment_id=assessment.id)
+
+    # --- FIX STARTS HERE ---
+    # 1. Calculate the assessment's deadline to pass to the template's timer
+    deadline = session.start_time + timezone.timedelta(minutes=assessment.duration_minutes)
+    
+    # 2. Prepare the list of coding questions for the navigation bar
+    # This ensures the nav bar is visible even on the quiz page for a consistent UI
+    all_coding_questions = AssessmentQuestion.objects.filter(assessment=assessment).select_related('question').order_by('order')
+    nav_questions_data = []
+    for aq in all_coding_questions:
+        # At the quiz stage, no coding questions have been attempted or solved yet
+        nav_questions_data.append({
+            'question': aq.question,
+            'is_solved': False,
+            'is_attempted': False,
+        })
+    # --- FIX ENDS HERE ---
+
+    # Handle the quiz logic
     questions = list(quiz.questions.all())
     import random
     random.shuffle(questions)
+
     if request.method == 'POST':
-        # Save submission
         submission = QuizSubmission.objects.create(user=request.user, quiz=quiz)
         score = 0
         for q in questions:
@@ -475,36 +503,94 @@ def assessment_quiz(request, assessment_id):
                     score += 1
         submission.score = score
         submission.save()
+        
         session.quiz_submitted = True
         session.save()
-        messages.success(request, f"Quiz submitted! Score: {score}/{len(questions)}. Coding section unlocked.")
+        
+        messages.success(request, f"Quiz submitted! Your score: {score}/{len(questions)}. The coding section is now unlocked.")
         return redirect('assessment_detail', assessment_id=assessment.id)
-    return render(request, 'codingapp/assessment_quiz.html', {
+
+    # 3. Add the new data to the context dictionary
+    context = {
         'assessment': assessment,
         'quiz': quiz,
         'questions': questions,
-    })
+        'end_time': deadline.isoformat(),      # This fixes the timer
+        'all_questions': nav_questions_data,  # This provides data for the nav bar
+    }
+    
+    return render(request, 'codingapp/assessment_quiz.html', context)
 
+@login_required
+def assessment_leaderboard_list(request):
+    """
+    Displays a list of all assessments for which a leaderboard can be viewed.
+    """
+    if request.user.is_staff:
+        # Staff can see leaderboards for all assessments
+        assessments = Assessment.objects.all().order_by('-end_time')
+    else:
+        # Students can see leaderboards for assessments in their groups
+        user_groups = request.user.custom_groups.all()
+        assessments = Assessment.objects.filter(groups__in=user_groups).distinct().order_by('-end_time')
+    
+    context = {
+        'assessments': assessments
+    }
+    return render(request, 'codingapp/assessment_leaderboard_list.html', context)
 
 @login_required
 def assessment_leaderboard(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
+
+    # Permission Check
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
         if not assessment.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
-    leaderboard = (
-        AssessmentSubmission.objects
-        .filter(assessment=assessment)
-        .values('user__username')
-        .annotate(total_score=Count('score'))
-        .order_by('-total_score')
-    )
-    return render(request, "codingapp/assessment_leaderboard.html", {
-        "assessment": assessment,
-        "leaderboard": leaderboard
-    })
 
+    # Get all users who are assigned to the assessment's groups
+    participant_ids = assessment.groups.prefetch_related('students').values_list('students', flat=True).distinct()
+    participants = User.objects.filter(id__in=participant_ids)
+
+    # Get all coding scores for this assessment, summed up per user
+    coding_scores = AssessmentSubmission.objects.filter(
+        assessment=assessment
+    ).values('user__id').annotate(total_coding_score=Sum('score'))
+    
+    # Create a dictionary for fast lookup: {user_id: coding_score}
+    coding_scores_dict = {item['user__id']: item['total_coding_score'] for item in coding_scores}
+
+    # Get all quiz scores if the assessment has a quiz
+    quiz_scores_dict = {}
+    if assessment.quiz:
+        quiz_scores = QuizSubmission.objects.filter(
+            quiz=assessment.quiz
+        ).values('user__id', 'score')
+        quiz_scores_dict = {item['user__id']: item['score'] for item in quiz_scores}
+
+    # Combine the scores for every participant
+    leaderboard_data = []
+    for user in participants:
+        quiz_score = quiz_scores_dict.get(user.id, 0)
+        coding_score = coding_scores_dict.get(user.id, 0)
+        total_score = quiz_score + coding_score
+
+        leaderboard_data.append({
+            'username': user.username,
+            'quiz_score': quiz_score,
+            'coding_score': coding_score,
+            'total_score': total_score,
+        })
+
+    # Sort the final list by total score in descending order
+    leaderboard_data.sort(key=lambda x: x['total_score'], reverse=True)
+
+    context = {
+        "assessment": assessment,
+        "leaderboard": leaderboard_data
+    }
+    return render(request, "codingapp/assessment_leaderboard.html", context)
 from django.contrib import messages
 from django.shortcuts import render, get_object_or_404, redirect
 from django.utils import timezone
@@ -512,100 +598,89 @@ from django.contrib.auth.decorators import login_required
 
 @login_required
 def submit_assessment_code(request, assessment_id, question_id):
-    A = get_object_or_404(Assessment, id=assessment_id)
-    Qobj = get_object_or_404(Question, id=question_id)
+    assessment = get_object_or_404(Assessment, id=assessment_id)
+    current_question_obj = get_object_or_404(Question, id=question_id)
+
+    # Permission checks
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
-        if not A.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
+        if not assessment.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
-    try:
-        sess = AssessmentSession.objects.get(user=request.user, assessment=A)
-        if not sess.start_time:
-            sess.start_time = timezone.now()
-            sess.save()
-    except AssessmentSession.DoesNotExist:
-        messages.warning(request, "Please start the assessment first.")
-        return redirect("assessment_list")
 
-    # --- NEW: Lock coding questions until quiz is submitted ---
-    if A.quiz and not sess.quiz_submitted:
+    session = get_object_or_404(AssessmentSession, user=request.user, assessment=assessment)
+    if assessment.quiz and not session.quiz_submitted:
         messages.error(request, "You must complete the quiz section before accessing coding questions.")
-        return redirect('assessment_detail', assessment_id=A.id)
+        return redirect('assessment_detail', assessment_id=assessment.id)
 
-    deadline = sess.start_time + timezone.timedelta(minutes=A.duration_minutes)
-    now = timezone.now()
-    remaining_seconds = max(0, int((deadline - now).total_seconds()))
-    read_only = remaining_seconds <= 0
-    existing = AssessmentSubmission.objects.filter(
-        assessment=A, question=Qobj, user=request.user
-    ).first()
-    code = existing.code if existing else ""
-    lang = existing.language if existing else "python"
-    results = None
-    error_output = None
-    score = 0
-    next_q = None
+    deadline = session.start_time + timezone.timedelta(minutes=assessment.duration_minutes)
+    read_only = timezone.now() > deadline
 
-    if existing and existing.score == len(Qobj.test_cases):
-        # Already fully solved, lock editor
-        read_only = True
-        results, _ = execute_code(code, lang, Qobj.test_cases)
-        score = existing.score
-    elif request.method == "POST" and not read_only:
+    # Handle POST request for new code submission
+    if request.method == "POST" and not read_only:
         code = request.POST.get("code", "").strip()
         lang = request.POST.get("language", "python")
         if not code:
             messages.error(request, "Code cannot be empty.")
         else:
-            results, error_output = execute_code(code, lang, Qobj.test_cases)
+            results, error_output = execute_code(code, lang, current_question_obj.test_cases)
             score = sum(1 for r in results if r["status"] == "Accepted")
-            all_accepted = all(r["status"] == "Accepted" for r in results) if results else False
-            if existing:
-                existing.code = code
-                existing.language = lang
-                existing.output = "\n".join(results[0]["actual_output"]) if results else ""
-                existing.error = error_output or ""
-                existing.score = score
-                existing.save()
-            else:
-                AssessmentSubmission.objects.create(
-                    user=request.user, assessment=A, question=Qobj,
-                    code=code, language=lang,
-                    output="\n".join(results[0]["actual_output"]) if results else "",
-                    error=error_output or "", score=score
-                )
-            if all_accepted:
-                read_only = True
-                messages.success(request, "All test cases passed! Question locked.")
-            else:
-                read_only = False
-                messages.info(request, "Some test cases failed. Please try again.")
 
-    all_qs = AssessmentQuestion.objects.filter(assessment=A).select_related('question')
-    for item in all_qs:
-        q2 = item.question
-        if q2.id != Qobj.id:
-            done = AssessmentSubmission.objects.filter(
-                assessment=A, question=q2, user=request.user, score=len(q2.test_cases)
-            ).exists()
-            if not done:
-                next_q = q2
-                break
+            AssessmentSubmission.objects.update_or_create(
+                user=request.user, assessment=assessment, question=current_question_obj,
+                defaults={
+                    'code': code,
+                    'language': lang,
+                    'output': "\n".join(res["actual_output"][0] for res in results if res.get("actual_output")),
+                    'error': error_output or "\n".join(res.get("error_message", "") for res in results),
+                    'score': score
+                }
+            )
+        # Redirect after POST to show results on the reloaded page
+        return redirect('submit_assessment_code', assessment_id=assessment.id, question_id=question_id)
 
-    return render(request, "codingapp/submit_assessment_code.html", {
-        "assessment": A,
-        "question": Qobj,
+    # --- THIS IS THE FIX: Logic for GET request to show results ---
+    submission_results = None
+    latest_submission = AssessmentSubmission.objects.filter(
+        assessment=assessment, question=current_question_obj, user=request.user
+    ).first()
+
+    if latest_submission:
+        # Re-run the saved code to generate the detailed result breakdown for display
+        submission_results, _ = execute_code(latest_submission.code, latest_submission.language, current_question_obj.test_cases)
+
+    # Prepare data for rendering the template
+    code = latest_submission.code if latest_submission else ""
+    lang = latest_submission.language if latest_submission else "python"
+    is_fully_solved = latest_submission and latest_submission.score == len(current_question_obj.test_cases)
+    final_read_only = read_only or is_fully_solved
+
+    # Prepare data for the question navigation bar
+    all_qs = AssessmentQuestion.objects.filter(assessment=assessment).select_related('question').order_by('order')
+    nav_questions = []
+    for aq in all_qs:
+        sub = AssessmentSubmission.objects.filter(assessment=assessment, question=aq.question, user=request.user).first()
+        is_solved = sub and sub.score == len(aq.question.test_cases)
+        is_attempted = sub is not None
+        nav_questions.append({
+            'question': aq.question,
+            'is_solved': is_solved,
+            'is_attempted': is_attempted,
+        })
+
+    context = {
+        "assessment": assessment,
+        "question": current_question_obj,
         "code": code,
         "selected_language": lang,
         "supported_languages": SUPPORTED_LANGUAGES,
-        "results": results,
-        "score": score,
-        "read_only": read_only,
-        "next_question": next_q,
+        "read_only": final_read_only,
         "end_time": deadline.isoformat(),
-        "remaining_seconds": remaining_seconds
-    })
+        "all_questions": nav_questions,
+        "results": submission_results,  # This now contains the data to display
+    }
+    return render(request, "codingapp/submit_assessment_code.html", context)
 
+    
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import user_passes_test
 from .models import Module
@@ -798,18 +873,46 @@ def teacher_add_assessment(request):
         form = AssessmentForm()
     return render(request, 'codingapp/teacher_assessment_form.html', {'form': form, 'action': 'Add'})
 
+from .models import Assessment, AssessmentQuestion # Make sure AssessmentQuestion is imported
+
 @user_passes_test(is_teacher)
 def teacher_edit_assessment(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
     if request.method == "POST":
         form = AssessmentForm(request.POST, instance=assessment)
         if form.is_valid():
-            form.save()
+            # First, save the assessment instance and its direct M2M fields (like 'groups').
+            # The 'commit=False' is not strictly needed here but is good practice if you have more complex logic.
+            assessment = form.save(commit=False)
+            assessment.save()
+            # This saves the 'groups' field correctly.
+            form.save_m2m()
+
+            # Now, manually handle the 'questions' relationship through the intermediary model.
+            selected_questions = form.cleaned_data.get('questions')
+
+            # Clear out the old question relationships for this assessment.
+            assessment.assessmentquestion_set.all().delete()
+
+            # Create the new question relationships from the selection.
+            for question in selected_questions:
+                AssessmentQuestion.objects.create(assessment=assessment, question=question)
+
+            messages.success(request, "Assessment updated successfully.")
             return redirect('teacher_assessment_list')
     else:
-        form = AssessmentForm(instance=assessment)
-    return render(request, 'codingapp/teacher_assessment_form.html', {'form': form, 'action': 'Edit'})
+        # For the GET request, pre-populate the form with the currently selected questions.
+        initial_data = {
+            'questions': assessment.assessmentquestion_set.values_list('question_id', flat=True)
+        }
+        form = AssessmentForm(instance=assessment, initial=initial_data)
 
+    return render(request, 'codingapp/teacher_assessment_form.html', {
+        'form': form,
+        'action': 'Edit',
+        'assessment': assessment
+    })
+    
 @user_passes_test(is_teacher)
 def teacher_delete_assessment(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
@@ -1530,7 +1633,7 @@ def run_code_view(request):
                 "stdin": stdin  # ✅ Send custom input
             }
 
-            response = requests.post("https://emkc.org/api/v2/piston/execute", json=payload, timeout=10)
+            response = requests.post(settings.PISTON_API_URL, json=payload, timeout=10)
             response.raise_for_status()
             result = response.json()
 
@@ -1710,3 +1813,26 @@ def export_student_performance(request):
         ])
 
     return response
+
+@login_required
+def assessment_result(request, assessment_id):
+    assessment = get_object_or_404(Assessment, id=assessment_id)
+    session = get_object_or_404(AssessmentSession, user=request.user, assessment=assessment)
+# --- FIX: Record the end time when the user finishes ---
+    if not session.end_time:
+        session.end_time = timezone.now()
+        session.save()
+    # Get all submissions for this assessment by the user
+    submissions = AssessmentSubmission.objects.filter(user=request.user, assessment=assessment)
+    total_score = sum(sub.score for sub in submissions)
+
+    # You might want to mark the session as finished, e.g., by setting an end_time
+    # session.end_time = timezone.now()
+    # session.save()
+
+    context = {
+        'assessment': assessment,
+        'submissions': submissions,
+        'total_score': total_score,
+    }
+    return render(request, 'codingapp/assessment_result.html', context)

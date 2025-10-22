@@ -1,14 +1,18 @@
 import os
 from pathlib import Path
 import dj_database_url
+from dotenv import load_dotenv # Add this
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv() # And this
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-default-secret-key')
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
-JUDGE0_API_KEY = "9fbd908224mshda77b4f2563d12dp1997cajsn15b3945af3d7"
-DEBUG = True
+#JUDGE0_API_KEY = "9fbd908224mshda77b4f2563d12dp1997cajsn15b3945af3d7"
+JUDGE0_API_KEY = os.environ.get('JUDGE0_API_KEY')
+#DEBUG = True
 #PISTON_API_URL = "https://emkc.org/api/v2/piston/execute"
-PISTON_API_URL = "http://localhost:2000/api/v2/execute"
+#PISTON_API_URL = "http://localhost:2000/api/v2/execute"
+PISTON_API_URL = os.environ.get('PISTON_API_URL', 'https://emkc.org/api/v2/piston/execute')
 
 
 #ALLOWED_HOSTS = ['localhost', '127.0.0.1','192.168.72.169']
@@ -71,12 +75,24 @@ WSGI_APPLICATION = 'codingplatform.wsgi.application'
    #     'NAME': BASE_DIR / "db.sqlite3",
     #}
 #}
+#DATABASES = {
+   # 'default': dj_database_url.config(
+  #      default='sqlite:///db.sqlite3',
+ #       conn_max_age=600
+#    )
+#}
+
 DATABASES = {
-    'default': dj_database_url.config(
-        default='sqlite:///db.sqlite3',
-        conn_max_age=600
-    )
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('DB_NAME'),
+        'USER': os.environ.get('DB_USER'),
+        'PASSWORD': os.environ.get('DB_PASSWORD'),
+        'HOST': os.environ.get('DB_HOST'),
+        'PORT': os.environ.get('DB_PORT'),
+    }
 }
+
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'  # ✅ Use database-backed session storage
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -87,7 +103,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Kolkata'
 USE_I18N = True
 USE_TZ = True
 

@@ -1,0 +1,26 @@
+{% extends "codingapp/base.html" %}
+
+{% block title %}Select Leaderboard{% endblock %}
+
+{% block content %}
+<div class="card p-4">
+    <div class="text-center mb-4">
+        <h2>Assessment Leaderboards</h2>
+        <p class="lead">Select an assessment to view its leaderboard.</p>
+    </div>
+
+    <div class="list-group">
+        {% for assessment in assessments %}
+            <a href="{% url 'assessment_leaderboard' assessment.id %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 class="mb-1">{{ assessment.title }}</h5>
+                    <small class="text-muted">Ended on: {{ assessment.end_time|date:"F d, Y, P" }}</small>
+                </div>
+                <i class="bi bi-chevron-right"></i>
+            </a>
+        {% empty %}
+            <p class="text-center text-muted">No assessment leaderboards are available to view.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

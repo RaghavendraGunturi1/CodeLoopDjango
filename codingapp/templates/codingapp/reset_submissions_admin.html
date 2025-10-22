@@ -1,35 +1,48 @@
 {% extends "codingapp/base.html" %}
+
+{% block title %}Reset Assessment Submissions{% endblock %}
+
 {% block content %}
-<h2>Reset Assessment Submissions for a User</h2>
+<div class="card p-4">
+    <h2 class="mb-4">Reset Student Assessment Progress</h2>
 
-<form method="post" class="card p-4 mb-4">
-    {% csrf_token %}
-    <div class="mb-3">
-        <label for="user_id" class="form-label">Select User:</label>
-        <select name="user_id" id="user_id" class="form-select" required>
-            <option value="">-- Select User --</option>
-            {% for user in users %}
-                <option value="{{ user.id }}">{{ user.username }} ({{ user.get_full_name }})</option>
-            {% endfor %}
-        </select>
-    </div>
-    <div class="mb-3">
-        <label for="assessment_id" class="form-label">Select Assessment:</label>
-        <select name="assessment_id" id="assessment_id" class="form-select" required>
-            <option value="">-- Select Assessment --</option>
-            {% for assessment in assessments %}
-                <option value="{{ assessment.id }}">{{ assessment.title }}</option>
-            {% endfor %}
-        </select>
-    </div>
-    <button type="submit" class="btn btn-danger">Reset Submissions & Session</button>
-</form>
-
-{% if messages %}
-    <ul class="list-unstyled">
+    {% if messages %}
         {% for message in messages %}
-            <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+            <div class="alert alert-success" role="alert">
+                {{ message }}
+            </div>
         {% endfor %}
-    </ul>
-{% endif %}
+    {% endif %}
+
+    <p>Select a student and an assessment to delete all of their submissions and reset their session timer. This will allow them to retake the assessment from the beginning. This action cannot be undone.</p>
+
+    <form method="POST">
+        {% csrf_token %}
+        <div class="row">
+            <div class="col-md-5 mb-3">
+                <label for="user_id" class="form-label">Select Student</label>
+                <select name="user_id" id="user_id" class="form-select" required>
+                    <option value="" disabled selected>-- Choose a student --</option>
+                    {% for user in users %}
+                        {% if not user.is_staff %}
+                             <option value="{{ user.id }}">{{ user.username }} - {{ user.first_name }} {{ user.last_name }}</option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-5 mb-3">
+                <label for="assessment_id" class="form-label">Select Assessment</label>
+                <select name="assessment_id" id="assessment_id" class="form-select" required>
+                    <option value="" disabled selected>-- Choose an assessment --</option>
+                    {% for assessment in assessments %}
+                        <option value="{{ assessment.id }}">{{ assessment.title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-end mb-3">
+                <button type="submit" class="btn btn-danger w-100">Reset</button>
+            </div>
+        </div>
+    </form>
+</div>
 {% endblock %}
