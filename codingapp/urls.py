@@ -13,14 +13,6 @@ urlpatterns = [
     path('questions/', views.question_list, name='question_list'),
     path('questions/<int:pk>/', views.question_detail, name='question_detail'),
     path('leaderboard/', views.leaderboard, name='leaderboard'),
-<<<<<<< HEAD
-    # --- Add your new API route here ---
-    path('api/questions/<int:pk>/', views.question_api_detail, name='question_api_detail'),
-    # --- Add the new API route for submission ---
-    path('api/submit/', views.submit_code_api, name='submit_code_api'),
-    path('api/questions/', views.question_list_api, name='question_list_api'), # <-- ADD THIS LINE
-=======
->>>>>>> parent of dd2e014 (node developement)
 
     # Authentication Routes
     path('register/', views.register, name='register'),

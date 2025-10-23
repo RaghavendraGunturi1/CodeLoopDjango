@@ -117,28 +117,4 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'dashboard'
 LOGOUT_REDIRECT_URL = 'login'
-<<<<<<< HEAD
 PISTON_API_TIMEOUT = 10
-
-# Celery Configuration Options
-CELERY_BROKER_URL = 'redis://localhost:6379/0'
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE # Use the same timezone as Django
-
-# in codingplatform/settings.py (at the bottom)
-
-# CORS_ALLOWED_ORIGINS is for Vite/React dev server
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:8000",
-]
-
-CORS_ALLOW_CREDENTIALS = True  # <--- ADD THIS LINE
-CSRF_TRUSTED_ORIGINS = ["http://localhost:5173"]
-=======
-PISTON_API_TIMEOUT = 10
->>>>>>> parent of dd2e014 (node developement)

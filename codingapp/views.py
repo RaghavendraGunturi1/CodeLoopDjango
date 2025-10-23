@@ -13,6 +13,7 @@ from django.db.models import Q
 from django.conf import settings
 
 
+
 from .models import (
     Question, Submission, Module,
     Assessment, AssessmentQuestion, AssessmentSubmission,
@@ -39,78 +40,6 @@ class CustomLoginView(LoginView):
         self.request.session['force_splash'] = True
         return response
 
-<<<<<<< HEAD
-
-@api_view(['GET'])
-def question_list_api(request):
-    """
-    API endpoint to return a list of all questions.
-    """
-    questions = Question.objects.all()
-    # The 'many=True' argument tells the serializer that we are passing a list of objects
-    serializer = QuestionSerializer(questions, many=True)
-    return Response(serializer.data)
-
-    
-# in codingapp/views.py
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .serializers import QuestionSerializer
-
-@api_view(['POST'])
-def submit_code_api(request):
-    """
-    API endpoint for React. It now creates a Submission object
-    and calls the correct Celery task, just like the main view.
-    """
-    if not request.user.is_authenticated:
-        return Response({'error': 'Authentication required.'}, status=401)
-
-    question_id = request.data.get('question_id')
-    code = request.data.get('code', '').strip()
-    language = request.data.get('language', 'python')
-    
-    if not all([question_id, code, language]):
-        return Response({'error': 'Missing data (question_id, code, or language).'}, status=400)
-
-    try:
-        question = get_object_or_404(Question, pk=question_id)
-
-        # Create or update the submission object for the database
-        sub, created = Submission.objects.get_or_create(
-            user=request.user, 
-            question=question,
-            defaults={'code': code, 'language': language, 'status': 'Pending'}
-        )
-        
-        if not created:
-            sub.code = code
-            sub.language = language
-            sub.status = 'Pending'
-            sub.output = None
-            sub.save()
-
-        # Call the correct Celery task with the submission ID
-        execute_code_task.delay(submission_id=sub.id)
-
-        # Return a success response to the React frontend
-        return Response({'message': 'Submission received!', 'submission_id': sub.id}, status=202)
-
-    except Question.DoesNotExist:
-        return Response({'error': 'Question not found.'}, status=404)
-    except Exception as e:
-        return Response({'error': f'An unexpected server error occurred: {str(e)}'}, status=500)
-
-@api_view(['GET'])
-def question_api_detail(request, pk):
-    try:
-        question = Question.objects.get(pk=pk)
-        serializer = QuestionSerializer(question)
-        return Response(serializer.data)
-    except Question.DoesNotExist:
-        return Response({'error': 'Question not found'}, status=404)
-=======
->>>>>>> parent of dd2e014 (node developement)
 
 def is_admin(user):
     return user.is_staff
@@ -317,50 +246,15 @@ def question_list(request):
         qs = Question.objects.filter(module__in=modules).distinct()
     return render(request, 'codingapp/question_list.html', {'questions': qs})
 
-<<<<<<< HEAD
-# In codingapp/views.py
-from django.shortcuts import render, get_object_or_404
-from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse, HttpResponseForbidden
-from .models import Question, Submission, ModuleCompletion
-from .tasks import execute_code_task
-import json
-
-import json
-from django.shortcuts import render, get_object_or_404
-from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
-
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-
-from .models import Question, Submission  # <- Added Submission import
-from .serializers import QuestionSerializer
-from .tasks import execute_code_task # <- Imported your new task
-
-# ... (keep any other views like home, register, dashboard etc.) ...
-
-
-# ENTIRELY NEW AND UPDATED VIEW BASED ON YOUR CODE
-=======
->>>>>>> parent of dd2e014 (node developement)
 @login_required
 def question_detail(request, pk):
     q = get_object_or_404(Question, pk=pk)
 
     if not request.user.is_staff:
-        # This assumes you have a 'custom_groups' related_name on your user model
         user_groups = request.user.custom_groups.all()
         if not q.module or not q.module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
-<<<<<<< HEAD
-    # --- POST Request Logic (for AJAX submissions from the template) ---
-    if request.method == "POST":
-        if not request.user.is_authenticated:
-            return JsonResponse({'error': 'Authentication required.'}, status=401)
-            
-=======
     code = request.session.get(f'code_{pk}', '')
     lang = request.session.get(f'language_{pk}', 'python')
     error = stderr = results = None
@@ -371,35 +265,16 @@ def question_detail(request, pk):
             code, lang = last.code, last.language
 
     if request.method == "POST":
->>>>>>> parent of dd2e014 (node developement)
         code = request.POST.get("code", "").strip()
         lang = request.POST.get("language", "python")
         if not code:
-<<<<<<< HEAD
-            return JsonResponse({'error': 'Code cannot be empty.'}, status=400)
-
-        try:
-            # Create or update the submission object
-=======
             error = "Code cannot be empty"
         else:
             results, stderr = execute_code(code, lang, q.test_cases)
->>>>>>> parent of dd2e014 (node developement)
             sub, created = Submission.objects.get_or_create(
                 user=request.user, question=q,
                 defaults={'code': code, 'language': lang, 'status': 'Pending'}
             )
-<<<<<<< HEAD
-            
-            if not created:
-                sub.code = code
-                sub.language = lang
-                sub.status = 'Pending'
-                sub.output = None  # Clear previous output
-                sub.save()
-            
-            # Store code in session for quick retrieval
-=======
             sub.code = code
             sub.language = lang
             all_accepted = results and all(r["status"] == "Accepted" for r in results)
@@ -432,44 +307,13 @@ def question_detail(request, pk):
                 if accepted_count == module_questions.count():
                     ModuleCompletion.objects.get_or_create(user=request.user, module=q.module)
 
->>>>>>> parent of dd2e014 (node developement)
             request.session[f'code_{pk}'] = code
             request.session[f'language_{pk}'] = lang
             request.session.modified = True
 
-<<<<<<< HEAD
-            # Call the Celery task with the submission ID
-            execute_code_task.delay(submission_id=sub.id)
-
-            return JsonResponse({'submission_id': sub.id})
-
-        except Exception as e:
-            return JsonResponse({'error': f'An unexpected server error occurred: {str(e)}'}, status=500)
-
-    # --- GET Request Logic (for initial page load) ---
-    last_submission = Submission.objects.filter(user=request.user, question=q).order_by('-timestamp').first()
-    
-    # Prioritize session code, then last submission, then empty
-    code = request.session.get(f'code_{pk}', last_submission.code if last_submission else '')
-    lang = request.session.get(f'language_{pk}', last_submission.language if last_submission else 'python')
-    
-    results_data = None
-    if last_submission and last_submission.output:
-        try:
-            # Try to parse the output as JSON
-            output_dict = json.loads(last_submission.output)
-            if isinstance(output_dict, dict):
-                results_data = output_dict.get('results')
-        except (json.JSONDecodeError, TypeError):
-            # If it's not valid JSON, treat it as a plain string
-            results_data = [{"status": "Info", "actual_output": [str(last_submission.output)]}]
-            
-    context = {
-=======
             messages.success(request, "Code submitted!") if not stderr else messages.error(request, stderr)
 
     return render(request, "codingapp/question_detail.html", {
->>>>>>> parent of dd2e014 (node developement)
         "question": q,
         "code": code,
         "selected_language": lang,
