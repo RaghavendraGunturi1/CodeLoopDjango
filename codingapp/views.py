@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.conf import settings
-from .tasks import execute_code_task # Make sure to import this
+
 
 from .models import (
     Question, Submission, Module,
@@ -39,6 +39,7 @@ class CustomLoginView(LoginView):
         self.request.session['force_splash'] = True
         return response
 
+<<<<<<< HEAD
 
 @api_view(['GET'])
 def question_list_api(request):
@@ -108,10 +109,76 @@ def question_api_detail(request, pk):
         return Response(serializer.data)
     except Question.DoesNotExist:
         return Response({'error': 'Question not found'}, status=404)
+=======
+>>>>>>> parent of dd2e014 (node developement)
 
 def is_admin(user):
     return user.is_staff
 
+def execute_code(code, language, test_cases):
+    """Helper to run code via Piston and collect results."""
+    results = []
+    error_output = None
+
+    for test in test_cases or []:
+        payload = {
+            "language": language,
+            "version": "*",
+            "files": [{"name": "solution", "content": code}],
+            "stdin": test.get("input", "")
+        }
+        try:
+            resp = requests.post(PISTON_API_URL, json=payload, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            stdout = data.get("run", {}).get("stdout", "").strip()
+            stderr = data.get("run", {}).get("stderr", "").strip()
+
+            # Split the stdout into lines and strip whitespace
+            actual_lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+            expected_lines = test.get("expected_output", [])
+
+            # Compare actual output with expected output
+            if len(actual_lines) != len(expected_lines):
+                status = "Rejected"
+                error_message = f"Expected {len(expected_lines)} lines, got {len(actual_lines)} lines"
+            else:
+                # Compare each line
+                mismatches = []
+                for i, (actual, expected) in enumerate(zip(actual_lines, expected_lines)):
+                    if actual != expected:
+                        mismatches.append(f"Line {i+1}: Expected '{expected}', got '{actual}'")
+                if mismatches:
+                    status = "Rejected"
+                    error_message = "; ".join(mismatches)
+                else:
+                    status = "Accepted"
+                    error_message = ""
+
+            if stderr:
+                status = "Error"
+                error_message = stderr
+
+            results.append({
+                "input": test.get("input", ""),
+                "expected_output": expected_lines,  # Now a list of strings
+                "actual_output": actual_lines,      # Now a list of strings
+                "status": status,
+                "error_message": error_message if status in ["Rejected", "Error"] else ""
+            })
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Piston API request failed: {e}", exc_info=True)
+            msg = f"API error: {e}"
+            results.append({
+                "input": test.get("input", ""),
+                "expected_output": test.get("expected_output", []),
+                "actual_output": [],
+                "status": "Error",
+                "error_message": msg
+            })
+            break
+
+    return results, error_output
 
 def home(request):
     return redirect('dashboard') if request.user.is_authenticated else redirect('login')
@@ -250,6 +317,7 @@ def question_list(request):
         qs = Question.objects.filter(module__in=modules).distinct()
     return render(request, 'codingapp/question_list.html', {'questions': qs})
 
+<<<<<<< HEAD
 # In codingapp/views.py
 from django.shortcuts import render, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -274,35 +342,54 @@ from .tasks import execute_code_task # <- Imported your new task
 
 
 # ENTIRELY NEW AND UPDATED VIEW BASED ON YOUR CODE
+=======
+>>>>>>> parent of dd2e014 (node developement)
 @login_required
 def question_detail(request, pk):
     q = get_object_or_404(Question, pk=pk)
 
-    # --- Permission Check ---
     if not request.user.is_staff:
         # This assumes you have a 'custom_groups' related_name on your user model
         user_groups = request.user.custom_groups.all()
         if not q.module or not q.module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
+<<<<<<< HEAD
     # --- POST Request Logic (for AJAX submissions from the template) ---
     if request.method == "POST":
         if not request.user.is_authenticated:
             return JsonResponse({'error': 'Authentication required.'}, status=401)
             
+=======
+    code = request.session.get(f'code_{pk}', '')
+    lang = request.session.get(f'language_{pk}', 'python')
+    error = stderr = results = None
+
+    if not code:
+        last = Submission.objects.filter(user=request.user, question=q).first()
+        if last:
+            code, lang = last.code, last.language
+
+    if request.method == "POST":
+>>>>>>> parent of dd2e014 (node developement)
         code = request.POST.get("code", "").strip()
         lang = request.POST.get("language", "python")
-
         if not code:
+<<<<<<< HEAD
             return JsonResponse({'error': 'Code cannot be empty.'}, status=400)
 
         try:
             # Create or update the submission object
+=======
+            error = "Code cannot be empty"
+        else:
+            results, stderr = execute_code(code, lang, q.test_cases)
+>>>>>>> parent of dd2e014 (node developement)
             sub, created = Submission.objects.get_or_create(
-                user=request.user, 
-                question=q,
+                user=request.user, question=q,
                 defaults={'code': code, 'language': lang, 'status': 'Pending'}
             )
+<<<<<<< HEAD
             
             if not created:
                 sub.code = code
@@ -312,10 +399,45 @@ def question_detail(request, pk):
                 sub.save()
             
             # Store code in session for quick retrieval
+=======
+            sub.code = code
+            sub.language = lang
+            all_accepted = results and all(r["status"] == "Accepted" for r in results)
+            sub.status = "Accepted" if all_accepted else "Rejected" if results else "Pending"
+            sub.output = "\n".join(results[0]["actual_output"]) if results else ""
+            sub.error = stderr or ""
+            sub.save()
+            if all_accepted and q.module:
+                module_questions = q.module.questions.all()
+                solved_count = Submission.objects.filter(
+                    user=request.user,
+                    question__in=module_questions,
+                    status="Accepted"
+                ).values("question").distinct().count()
+
+                if solved_count == module_questions.count():
+                    from .models import ModuleCompletion  # import at the top if needed
+                    ModuleCompletion.objects.get_or_create(user=request.user, module=q.module)
+            
+
+            # ✅ Auto mark module as completed
+            if q.module:
+                module_questions = q.module.questions.all()
+                accepted_count = Submission.objects.filter(
+                    user=request.user,
+                    question__in=module_questions,
+                    status="Accepted"
+                ).values("question").distinct().count()
+
+                if accepted_count == module_questions.count():
+                    ModuleCompletion.objects.get_or_create(user=request.user, module=q.module)
+
+>>>>>>> parent of dd2e014 (node developement)
             request.session[f'code_{pk}'] = code
             request.session[f'language_{pk}'] = lang
             request.session.modified = True
 
+<<<<<<< HEAD
             # Call the Celery task with the submission ID
             execute_code_task.delay(submission_id=sub.id)
 
@@ -343,14 +465,18 @@ def question_detail(request, pk):
             results_data = [{"status": "Info", "actual_output": [str(last_submission.output)]}]
             
     context = {
+=======
+            messages.success(request, "Code submitted!") if not stderr else messages.error(request, stderr)
+
+    return render(request, "codingapp/question_detail.html", {
+>>>>>>> parent of dd2e014 (node developement)
         "question": q,
         "code": code,
         "selected_language": lang,
-        "submission": last_submission,
-        "results": results_data,
-    }
-    return render(request, "codingapp/question_detail.html", context)
-
+        "results": results,
+        "error": error,
+        "error_output": stderr,
+    })
 
 from django.views.decorators.http import require_POST
 from .models import Module, ModuleCompletion, Submission
