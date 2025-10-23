@@ -7,7 +7,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv() # And this
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-default-secret-key')
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
-#JUDGE0_API_KEY = "9fbd908224mshda77b4f2563d12dp1997cajsn15b3945af3d7"
 JUDGE0_API_KEY = os.environ.get('JUDGE0_API_KEY')
 #DEBUG = True
 #PISTON_API_URL = "https://emkc.org/api/v2/piston/execute"
@@ -93,6 +92,20 @@ DATABASES = {
     }
 }
 
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+}
+
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'  # ✅ Use database-backed session storage
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -108,7 +121,7 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
+#STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
 
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'

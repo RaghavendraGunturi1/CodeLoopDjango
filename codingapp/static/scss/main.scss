@@ -1,0 +1,117 @@
+// main.scss
+
+// 1. Override Bootstrap's Core Variables for our "Cyber Core" theme
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap');
+
+// -- Color Palette --
+$primary:       #00f0ff;  // Bright Cyan
+$secondary:     #8A2BE2;  // Electric Violet
+$light:         #1a202c;  // Dark Gray for card backgrounds
+$dark:          #0d1117;  // Deep Space Black for main background
+$success:       #00ff7f;  // Neon Green
+$danger:        #ff2d55;  // Neon Pink/Red
+$info:          $primary;
+$body-bg:       $dark;
+$body-color:    #a0aec0;  // Light gray for general text
+$headings-color:#e2e8f0;  // Lighter gray for headings
+
+// -- Links --
+$link-color: $primary;
+$link-hover-color: lighten($primary, 15%);
+
+// -- Components --
+$border-radius: .4rem;
+$border-color:  rgba(255, 255, 255, 0.1);
+
+// === FIX STARTS HERE ===
+// Card Overrides
+$card-bg:       $light;
+$card-border-color: $border-color;
+$card-color:    $body-color; // This will make the text in cards light gray
+
+// Table Overrides
+$table-color:               $body-color; // This makes table text light gray
+$table-border-color:        $border-color;
+$table-hover-color:         $headings-color;
+$table-striped-color:       $headings-color;
+$table-striped-bg-opacity:  0.03;
+// === FIX ENDS HERE ===
+
+$list-group-bg: transparent;
+$list-group-border-color: $border-color;
+
+// -- Fonts --
+$font-family-sans-serif: 'Roboto Mono', monospace;
+$headings-font-family:   'Roboto Mono', monospace;
+
+
+// 2. Import the original Bootstrap Sass files
+@import "../../../node_modules/bootstrap/scss/bootstrap";
+
+
+// 3. Add Custom Styles and Futuristic Polish
+body {
+    backdrop-filter: blur(5px);
+}
+
+.card {
+    background-color: rgba(26, 32, 44, 0.85);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.btn-primary {
+    box-shadow: 0 0 10px rgba($primary, 0.5);
+    transition: all 0.3s ease;
+    &:hover {
+        box-shadow: 0 0 20px rgba($primary, 0.8);
+        transform: translateY(-2px);
+    }
+}
+
+// Sidebar/Navbar styles (We'll use these when we rebuild the navbar)
+.sidebar-nav .nav-link.active,
+.sidebar-nav .nav-link:hover {
+    background: linear-gradient(90deg, rgba($primary, 0.2), rgba($primary, 0.05)) !important;
+    border-left: 3px solid $primary !important;
+    color: #fff !important;
+    text-shadow: 0 0 5px rgba($primary, 0.7);
+}
+
+// main.scss (add this at the end)
+
+// 4. Futuristic Glowing Border Effect Styles
+
+.glow-card {
+  position: relative; // Required for the effect to position itself correctly
+
+  // This is the pseudo-element that creates the actual glow
+  &::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit; // Inherits the border-radius from the card
+    
+    // The magic gradient that follows the mouse
+    background: conic-gradient(
+      from var(--start-angle, 0deg),
+      #0d1117, // Transparent start
+      #00f0ff, // Your primary neon color
+      #0d1117 15% /* End of the glow arc */
+    );
+    
+    // Opacity is controlled by a CSS variable, which our JS will change
+    opacity: var(--active-opacity, 0);
+    transition: opacity 0.3s ease;
+    
+    // Mask to create the border effect
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+}
