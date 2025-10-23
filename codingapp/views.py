@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.conf import settings
-
+from .tasks import execute_code_task # Make sure to import this
 
 
 from .models import (
@@ -40,74 +40,46 @@ class CustomLoginView(LoginView):
         self.request.session['force_splash'] = True
         return response
 
+# in codingapp/views.py
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .serializers import QuestionSerializer
+from .tasks import execute_code  # <--- Make sure this import is here
+
+@api_view(['POST'])
+def submit_code_api(request):
+    """
+    API endpoint to receive code, language, and question_id,
+    and then trigger a Celery task for execution.
+    """
+    question_id = request.data.get('question_id')
+    code = request.data.get('code')
+    language = request.data.get('language')
+
+    # Simple validation
+    if not all([question_id, code, language]):
+        return Response({'error': 'Missing data'}, status=400)
+
+    # Trigger the background task
+    # This is the magic from Phase 1!
+    task = execute_code.delay(code, language, question_id)
+
+    # Return the ID of the task so the frontend could potentially track it
+    return Response({'message': 'Submission received!', 'task_id': task.id}, status=202)
+
+
+@api_view(['GET'])
+def question_api_detail(request, pk):
+    try:
+        question = Question.objects.get(pk=pk)
+        serializer = QuestionSerializer(question)
+        return Response(serializer.data)
+    except Question.DoesNotExist:
+        return Response({'error': 'Question not found'}, status=404)
 
 def is_admin(user):
     return user.is_staff
 
-def execute_code(code, language, test_cases):
-    """Helper to run code via Piston and collect results."""
-    results = []
-    error_output = None
-
-    for test in test_cases or []:
-        payload = {
-            "language": language,
-            "version": "*",
-            "files": [{"name": "solution", "content": code}],
-            "stdin": test.get("input", "")
-        }
-        try:
-            resp = requests.post(PISTON_API_URL, json=payload, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            stdout = data.get("run", {}).get("stdout", "").strip()
-            stderr = data.get("run", {}).get("stderr", "").strip()
-
-            # Split the stdout into lines and strip whitespace
-            actual_lines = [line.strip() for line in stdout.splitlines() if line.strip()]
-            expected_lines = test.get("expected_output", [])
-
-            # Compare actual output with expected output
-            if len(actual_lines) != len(expected_lines):
-                status = "Rejected"
-                error_message = f"Expected {len(expected_lines)} lines, got {len(actual_lines)} lines"
-            else:
-                # Compare each line
-                mismatches = []
-                for i, (actual, expected) in enumerate(zip(actual_lines, expected_lines)):
-                    if actual != expected:
-                        mismatches.append(f"Line {i+1}: Expected '{expected}', got '{actual}'")
-                if mismatches:
-                    status = "Rejected"
-                    error_message = "; ".join(mismatches)
-                else:
-                    status = "Accepted"
-                    error_message = ""
-
-            if stderr:
-                status = "Error"
-                error_message = stderr
-
-            results.append({
-                "input": test.get("input", ""),
-                "expected_output": expected_lines,  # Now a list of strings
-                "actual_output": actual_lines,      # Now a list of strings
-                "status": status,
-                "error_message": error_message if status in ["Rejected", "Error"] else ""
-            })
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Piston API request failed: {e}", exc_info=True)
-            msg = f"API error: {e}"
-            results.append({
-                "input": test.get("input", ""),
-                "expected_output": test.get("expected_output", []),
-                "actual_output": [],
-                "status": "Error",
-                "error_message": msg
-            })
-            break
-
-    return results, error_output
 
 def home(request):
     return redirect('dashboard') if request.user.is_authenticated else redirect('login')
@@ -246,81 +218,87 @@ def question_list(request):
         qs = Question.objects.filter(module__in=modules).distinct()
     return render(request, 'codingapp/question_list.html', {'questions': qs})
 
+# In codingapp/views.py
+from django.shortcuts import render, get_object_or_404
+from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse, HttpResponseForbidden
+from .models import Question, Submission, ModuleCompletion
+from .tasks import execute_code_task
+import json
+
 @login_required
 def question_detail(request, pk):
     q = get_object_or_404(Question, pk=pk)
 
+    # --- Permission Check ---
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
         if not q.module or not q.module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
-    code = request.session.get(f'code_{pk}', '')
-    lang = request.session.get(f'language_{pk}', 'python')
-    error = stderr = results = None
-
-    if not code:
-        last = Submission.objects.filter(user=request.user, question=q).first()
-        if last:
-            code, lang = last.code, last.language
-
+    # --- POST Request Logic: Now more robust ---
     if request.method == "POST":
+        # Check for authentication again, specifically for fetch requests
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Authentication required.'}, status=401)
+            
         code = request.POST.get("code", "").strip()
         lang = request.POST.get("language", "python")
+
         if not code:
-            error = "Code cannot be empty"
-        else:
-            results, stderr = execute_code(code, lang, q.test_cases)
+            return JsonResponse({'error': 'Code cannot be empty.'}, status=400)
+
+        try:
+            # Reverting to the get_or_create logic which is safer
             sub, created = Submission.objects.get_or_create(
-                user=request.user, question=q,
+                user=request.user, 
+                question=q,
                 defaults={'code': code, 'language': lang, 'status': 'Pending'}
             )
-            sub.code = code
-            sub.language = lang
-            all_accepted = results and all(r["status"] == "Accepted" for r in results)
-            sub.status = "Accepted" if all_accepted else "Rejected" if results else "Pending"
-            sub.output = "\n".join(results[0]["actual_output"]) if results else ""
-            sub.error = stderr or ""
-            sub.save()
-            if all_accepted and q.module:
-                module_questions = q.module.questions.all()
-                solved_count = Submission.objects.filter(
-                    user=request.user,
-                    question__in=module_questions,
-                    status="Accepted"
-                ).values("question").distinct().count()
-
-                if solved_count == module_questions.count():
-                    from .models import ModuleCompletion  # import at the top if needed
-                    ModuleCompletion.objects.get_or_create(user=request.user, module=q.module)
+            if not created:
+                sub.code = code
+                sub.language = lang
+                sub.status = 'Pending'
+                sub.output = None
+                sub.save()
             
-
-            # ✅ Auto mark module as completed
-            if q.module:
-                module_questions = q.module.questions.all()
-                accepted_count = Submission.objects.filter(
-                    user=request.user,
-                    question__in=module_questions,
-                    status="Accepted"
-                ).values("question").distinct().count()
-
-                if accepted_count == module_questions.count():
-                    ModuleCompletion.objects.get_or_create(user=request.user, module=q.module)
-
             request.session[f'code_{pk}'] = code
             request.session[f'language_{pk}'] = lang
             request.session.modified = True
 
-            messages.success(request, "Code submitted!") if not stderr else messages.error(request, stderr)
+            execute_code_task.delay(submission_id=sub.id)
 
-    return render(request, "codingapp/question_detail.html", {
+            return JsonResponse({'submission_id': sub.id})
+
+        except Exception as e:
+            # If any error occurs during submission creation, return a JSON error
+            return JsonResponse({'error': f'An unexpected server error occurred: {str(e)}'}, status=500)
+
+    # --- GET Request Logic (remains the same) ---
+    last_submission = Submission.objects.filter(user=request.user, question=q).first()
+    code = request.session.get(f'code_{pk}', last_submission.code if last_submission else '')
+    lang = request.session.get(f'language_{pk}', last_submission.language if last_submission else 'python')
+    results_data = None
+    if last_submission and last_submission.output:
+        if isinstance(last_submission.output, str):
+            try:
+                output_dict = json.loads(last_submission.output)
+                if isinstance(output_dict, dict):
+                    results_data = output_dict.get('results')
+            except json.JSONDecodeError:
+                results_data = [{"status": "Info", "actual_output": [last_submission.output]}]
+        else:
+            results_data = [{"status": "Info", "actual_output": [str(last_submission.output)]}]
+            
+    context = {
         "question": q,
         "code": code,
         "selected_language": lang,
-        "results": results,
-        "error": error,
-        "error_output": stderr,
-    })
+        "submission": last_submission,
+        "results": results_data,
+    }
+    return render(request, "codingapp/question_detail.html", context)
+
 
 from django.views.decorators.http import require_POST
 from .models import Module, ModuleCompletion, Submission

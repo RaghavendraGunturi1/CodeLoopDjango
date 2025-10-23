@@ -13,7 +13,11 @@ urlpatterns = [
     path('questions/', views.question_list, name='question_list'),
     path('questions/<int:pk>/', views.question_detail, name='question_detail'),
     path('leaderboard/', views.leaderboard, name='leaderboard'),
-
+    # --- Add your new API route here ---
+    path('api/questions/<int:pk>/', views.question_api_detail, name='question_api_detail'),
+    # --- Add the new API route for submission ---
+    path('api/submit/', views.submit_code_api, name='submit_code_api'),
+    
     # Authentication Routes
     path('register/', views.register, name='register'),
     path('login/', auth_views.LoginView.as_view(template_name='registration/login.html'), name='login'),
