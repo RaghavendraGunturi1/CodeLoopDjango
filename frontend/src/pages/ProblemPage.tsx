@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import Editor from '@monaco-editor/react';
+import { useParams } from 'react-router-dom'; // <--- IMPORT THIS
 
 // (The Question interface remains the same)
 interface Question {
@@ -15,15 +16,15 @@ const ProblemPage = () => {
   const [error, setError] = useState<string | null>(null);
   // 1. Add new state to hold the code from the editor
   const [code, setCode] = useState<string>("# Write your Python code here");
+  const { questionId } = useParams<{ questionId: string }>(); // <--- GET THE ID FROM URL
 
   useEffect(() => {
-    const questionId = 1;
     axios.get(`http://localhost:8000/api/questions/${questionId}/`)      .then(response => setQuestion(response.data))
       .catch(error => {
         console.error("Error fetching question!", error);
         setError("Failed to load question.");
       });
-  }, []);
+  }, [questionId]);
 
   // 2. This function will be called when the user clicks the submit button
   const handleSubmit = async () => {

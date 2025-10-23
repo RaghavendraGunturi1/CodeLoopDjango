@@ -39,6 +39,18 @@ class CustomLoginView(LoginView):
         self.request.session['force_splash'] = True
         return response
 
+
+@api_view(['GET'])
+def question_list_api(request):
+    """
+    API endpoint to return a list of all questions.
+    """
+    questions = Question.objects.all()
+    # The 'many=True' argument tells the serializer that we are passing a list of objects
+    serializer = QuestionSerializer(questions, many=True)
+    return Response(serializer.data)
+
+    
 # in codingapp/views.py
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
