@@ -18,8 +18,7 @@ const ProblemPage = () => {
 
   useEffect(() => {
     const questionId = 1;
-    axios.get(`http://127.0.0.1:8000/api/questions/${questionId}/`)
-      .then(response => setQuestion(response.data))
+    axios.get(`http://localhost:8000/api/questions/${questionId}/`)      .then(response => setQuestion(response.data))
       .catch(error => {
         console.error("Error fetching question!", error);
         setError("Failed to load question.");
@@ -30,18 +29,39 @@ const ProblemPage = () => {
   const handleSubmit = async () => {
     if (!question) return;
 
+    // Helper function to get the CSRF token from cookies
+    const getCsrfToken = () => {
+      const csrfCookie = document.cookie.split('; ').find(row => row.startsWith('csrftoken='));
+      return csrfCookie ? csrfCookie.split('=')[1] : null;
+    };
+
+    const csrfToken = getCsrfToken();
+
+    if (!csrfToken) {
+      alert('CSRF token not found. Please ensure you are logged in to the main Django site.');
+      return;
+    }
+
     try {
-      // We will create this '/api/submit/' endpoint in Django next
-      const response = await axios.post('http://127.0.0.1:8000/api/submit/', {
-        question_id: question.id,
-        code: code,
-        language: 'python' // Hardcoding for now
-      });
+      const response = await axios.post('http://localhost:8000/api/submit/',        {
+          question_id: question.id,
+          code: code,
+          language: 'python'
+        }, 
+        {
+          withCredentials: true,  // Tells axios to send the login cookie
+          headers: {
+            'X-CSRFToken': csrfToken  // Adds the "secret handshake" header
+          }
+        }
+      );
+
       console.log('Submission Response:', response.data);
       alert('Submission sent successfully!');
+
     } catch (err) {
       console.error("Submission failed!", err);
-      alert('Failed to submit code.');
+      alert('Failed to submit code. Check the console for details.');
     }
   };
 

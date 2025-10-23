@@ -13,7 +13,6 @@ from django.db.models import Q
 from django.conf import settings
 from .tasks import execute_code_task # Make sure to import this
 
-
 from .models import (
     Question, Submission, Module,
     Assessment, AssessmentQuestion, AssessmentSubmission,
@@ -44,29 +43,50 @@ class CustomLoginView(LoginView):
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .serializers import QuestionSerializer
-from .tasks import execute_code  # <--- Make sure this import is here
 
 @api_view(['POST'])
 def submit_code_api(request):
     """
-    API endpoint to receive code, language, and question_id,
-    and then trigger a Celery task for execution.
+    API endpoint for React. It now creates a Submission object
+    and calls the correct Celery task, just like the main view.
     """
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required.'}, status=401)
+
     question_id = request.data.get('question_id')
-    code = request.data.get('code')
-    language = request.data.get('language')
-
-    # Simple validation
+    code = request.data.get('code', '').strip()
+    language = request.data.get('language', 'python')
+    
     if not all([question_id, code, language]):
-        return Response({'error': 'Missing data'}, status=400)
+        return Response({'error': 'Missing data (question_id, code, or language).'}, status=400)
 
-    # Trigger the background task
-    # This is the magic from Phase 1!
-    task = execute_code.delay(code, language, question_id)
+    try:
+        question = get_object_or_404(Question, pk=question_id)
 
-    # Return the ID of the task so the frontend could potentially track it
-    return Response({'message': 'Submission received!', 'task_id': task.id}, status=202)
+        # Create or update the submission object for the database
+        sub, created = Submission.objects.get_or_create(
+            user=request.user, 
+            question=question,
+            defaults={'code': code, 'language': language, 'status': 'Pending'}
+        )
+        
+        if not created:
+            sub.code = code
+            sub.language = language
+            sub.status = 'Pending'
+            sub.output = None
+            sub.save()
 
+        # Call the correct Celery task with the submission ID
+        execute_code_task.delay(submission_id=sub.id)
+
+        # Return a success response to the React frontend
+        return Response({'message': 'Submission received!', 'submission_id': sub.id}, status=202)
+
+    except Question.DoesNotExist:
+        return Response({'error': 'Question not found.'}, status=404)
+    except Exception as e:
+        return Response({'error': f'An unexpected server error occurred: {str(e)}'}, status=500)
 
 @api_view(['GET'])
 def question_api_detail(request, pk):
@@ -226,19 +246,35 @@ from .models import Question, Submission, ModuleCompletion
 from .tasks import execute_code_task
 import json
 
+import json
+from django.shortcuts import render, get_object_or_404
+from django.http import JsonResponse
+from django.contrib.auth.decorators import login_required
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+from .models import Question, Submission  # <- Added Submission import
+from .serializers import QuestionSerializer
+from .tasks import execute_code_task # <- Imported your new task
+
+# ... (keep any other views like home, register, dashboard etc.) ...
+
+
+# ENTIRELY NEW AND UPDATED VIEW BASED ON YOUR CODE
 @login_required
 def question_detail(request, pk):
     q = get_object_or_404(Question, pk=pk)
 
     # --- Permission Check ---
     if not request.user.is_staff:
+        # This assumes you have a 'custom_groups' related_name on your user model
         user_groups = request.user.custom_groups.all()
         if not q.module or not q.module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
-    # --- POST Request Logic: Now more robust ---
+    # --- POST Request Logic (for AJAX submissions from the template) ---
     if request.method == "POST":
-        # Check for authentication again, specifically for fetch requests
         if not request.user.is_authenticated:
             return JsonResponse({'error': 'Authentication required.'}, status=401)
             
@@ -249,45 +285,49 @@ def question_detail(request, pk):
             return JsonResponse({'error': 'Code cannot be empty.'}, status=400)
 
         try:
-            # Reverting to the get_or_create logic which is safer
+            # Create or update the submission object
             sub, created = Submission.objects.get_or_create(
                 user=request.user, 
                 question=q,
                 defaults={'code': code, 'language': lang, 'status': 'Pending'}
             )
+            
             if not created:
                 sub.code = code
                 sub.language = lang
                 sub.status = 'Pending'
-                sub.output = None
+                sub.output = None  # Clear previous output
                 sub.save()
             
+            # Store code in session for quick retrieval
             request.session[f'code_{pk}'] = code
             request.session[f'language_{pk}'] = lang
             request.session.modified = True
 
+            # Call the Celery task with the submission ID
             execute_code_task.delay(submission_id=sub.id)
 
             return JsonResponse({'submission_id': sub.id})
 
         except Exception as e:
-            # If any error occurs during submission creation, return a JSON error
             return JsonResponse({'error': f'An unexpected server error occurred: {str(e)}'}, status=500)
 
-    # --- GET Request Logic (remains the same) ---
-    last_submission = Submission.objects.filter(user=request.user, question=q).first()
+    # --- GET Request Logic (for initial page load) ---
+    last_submission = Submission.objects.filter(user=request.user, question=q).order_by('-timestamp').first()
+    
+    # Prioritize session code, then last submission, then empty
     code = request.session.get(f'code_{pk}', last_submission.code if last_submission else '')
     lang = request.session.get(f'language_{pk}', last_submission.language if last_submission else 'python')
+    
     results_data = None
     if last_submission and last_submission.output:
-        if isinstance(last_submission.output, str):
-            try:
-                output_dict = json.loads(last_submission.output)
-                if isinstance(output_dict, dict):
-                    results_data = output_dict.get('results')
-            except json.JSONDecodeError:
-                results_data = [{"status": "Info", "actual_output": [last_submission.output]}]
-        else:
+        try:
+            # Try to parse the output as JSON
+            output_dict = json.loads(last_submission.output)
+            if isinstance(output_dict, dict):
+                results_data = output_dict.get('results')
+        except (json.JSONDecodeError, TypeError):
+            # If it's not valid JSON, treat it as a plain string
             results_data = [{"status": "Info", "actual_output": [str(last_submission.output)]}]
             
     context = {
