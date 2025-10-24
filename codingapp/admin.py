@@ -3,9 +3,6 @@ from django import forms
 from django.forms import formset_factory
 from .models import Module, Question, Submission
 from .models import Assessment, AssessmentQuestion, AssessmentSubmission
-from django.contrib import admin
-from django.contrib.auth.models import Group as AuthGroup # Import the built-in Group
-from .models import Group # Your custom Group model
 
 # ==================== Custom Forms for Question Test Cases ====================
 
@@ -165,7 +162,3 @@ class CourseAdmin(admin.ModelAdmin):
     list_display = ('title', 'difficulty', 'is_public', 'created_by')
     inlines = [CourseContentInline]
     filter_horizontal = ('groups',)
-
-
-# Unregister the original Group model
-admin.site.unregister(AuthGroup)

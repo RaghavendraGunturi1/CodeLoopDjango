@@ -44,16 +44,8 @@ class CustomLoginView(LoginView):
 def is_admin(user):
     return user.is_staff
 
-import requests
-import logging
-
-# Get an instance of a logger
-logger = logging.getLogger(__name__)
-
 def execute_code(code, language, test_cases):
-    """
-    Helper to run code via Piston and collect results, with improved error handling.
-    """
+    """Helper to run code via Piston and collect results."""
     results = []
     error_output = None
 
@@ -64,28 +56,27 @@ def execute_code(code, language, test_cases):
             "files": [{"name": "solution", "content": code}],
             "stdin": test.get("input", "")
         }
-
         try:
             resp = requests.post(PISTON_API_URL, json=payload, timeout=10)
-            resp.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
-
+            resp.raise_for_status()
             data = resp.json()
             stdout = data.get("run", {}).get("stdout", "").strip()
             stderr = data.get("run", {}).get("stderr", "").strip()
 
+            # Split the stdout into lines and strip whitespace
             actual_lines = [line.strip() for line in stdout.splitlines() if line.strip()]
             expected_lines = test.get("expected_output", [])
 
-            if stderr:
-                status = "Error"
-                error_message = stderr
-            elif len(actual_lines) != len(expected_lines):
+            # Compare actual output with expected output
+            if len(actual_lines) != len(expected_lines):
                 status = "Rejected"
-                error_message = f"Output mismatch: Expected {len(expected_lines)} lines, but got {len(actual_lines)}."
+                error_message = f"Expected {len(expected_lines)} lines, got {len(actual_lines)} lines"
             else:
-                mismatches = [f"Line {i+1}: Expected '{expected}', got '{actual}'"
-                              for i, (actual, expected) in enumerate(zip(actual_lines, expected_lines))
-                              if actual != expected]
+                # Compare each line
+                mismatches = []
+                for i, (actual, expected) in enumerate(zip(actual_lines, expected_lines)):
+                    if actual != expected:
+                        mismatches.append(f"Line {i+1}: Expected '{expected}', got '{actual}'")
                 if mismatches:
                     status = "Rejected"
                     error_message = "; ".join(mismatches)
@@ -93,41 +84,20 @@ def execute_code(code, language, test_cases):
                     status = "Accepted"
                     error_message = ""
 
+            if stderr:
+                status = "Error"
+                error_message = stderr
+
             results.append({
                 "input": test.get("input", ""),
-                "expected_output": expected_lines,
-                "actual_output": actual_lines,
+                "expected_output": expected_lines,  # Now a list of strings
+                "actual_output": actual_lines,      # Now a list of strings
                 "status": status,
-                "error_message": error_message
+                "error_message": error_message if status in ["Rejected", "Error"] else ""
             })
-
-        except requests.exceptions.Timeout:
-            logger.error("Piston API request timed out.", exc_info=True)
-            msg = "The code execution timed out. Please check for infinite loops or inefficient code."
-            results.append({
-                "input": test.get("input", ""),
-                "expected_output": test.get("expected_output", []),
-                "actual_output": [],
-                "status": "Error",
-                "error_message": msg
-            })
-            break
-
-        except requests.exceptions.HTTPError as http_err:
-            logger.error(f"Piston API returned an HTTP error: {http_err}", exc_info=True)
-            msg = f"An error occurred with the code execution engine (HTTP {http_err.response.status_code})."
-            results.append({
-                "input": test.get("input", ""),
-                "expected_output": test.get("expected_output", []),
-                "actual_output": [],
-                "status": "Error",
-                "error_message": msg
-            })
-            break
-
         except requests.exceptions.RequestException as e:
             logger.error(f"Piston API request failed: {e}", exc_info=True)
-            msg = "Could not connect to the code execution engine. Please try again later."
+            msg = f"API error: {e}"
             results.append({
                 "input": test.get("input", ""),
                 "expected_output": test.get("expected_output", []),
@@ -138,8 +108,7 @@ def execute_code(code, language, test_cases):
             break
 
     return results, error_output
-    
-    
+
 def home(request):
     return redirect('dashboard') if request.user.is_authenticated else redirect('login')
 
@@ -1867,54 +1836,3 @@ def assessment_result(request, assessment_id):
         'total_score': total_score,
     }
     return render(request, 'codingapp/assessment_result.html', context)
-
-    # codingapp/views.py (add this at the end of the file)
-
-from django.views.decorators.http import require_POST
-import json
-
-@login_required
-@require_POST
-def execute_code_api(request, question_id):
-    """
-    API endpoint to execute code via AJAX without a full page reload.
-    This view is designed to be called by a JavaScript client.
-    """
-    try:
-        # 1. Parse the incoming JSON data from the request body
-        data = json.loads(request.body)
-        code = data.get("code", "")
-        language = data.get("language", "python")
-
-        # 2. Get the question object to access its test cases
-        question = get_object_or_404(Question, pk=question_id)
-
-        # 3. Reuse our existing, robust code execution logic
-        results, error_output = execute_code(code, language, question.test_cases)
-
-        # 4. Save the submission to the database, just like the original view
-        # This ensures user progress is still tracked
-        submission, _ = Submission.objects.update_or_create(
-            user=request.user,
-            question=question,
-            defaults={
-                'code': code,
-                'language': language,
-                'status': "Accepted" if all(r["status"] == "Accepted" for r in results) else "Rejected",
-                'output': results[0]['actual_output'] if results and results[0].get('actual_output') else "",
-                'error': error_output or "",
-            }
-        )
-        
-        # 5. Return the results as a JSON response
-        return JsonResponse({
-            "success": True,
-            "results": results,
-            "error_output": error_output
-        })
-
-    except json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
-    except Exception as e:
-        logger.error(f"Error in execute_code_api: {e}", exc_info=True)
-        return JsonResponse({"success": False, "error": "An unexpected server error occurred."}, status=500)

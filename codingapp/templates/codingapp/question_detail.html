@@ -4,31 +4,39 @@
 {% block title %}{{ question.title }}{% endblock %}
 
 {% block content %}
-<div class="card p-4" id="vue-app">
+<div class="card p-4">
     <h2>{{ question.title }}</h2>
     <p>{{ question.description|linebreaksbr }}</p>
 
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    {% if error %}
+        <h3 class="mt-4 text-danger">Error:</h3>
+        <pre class="bg-light p-3 text-danger">{{ error_output|default:error }}</pre>
+    {% endif %}
+
     <h3>Submit Your Code:</h3>
-    <div>
+    <form method="post" action="{% url 'question_detail' question.pk %}" id="code-submit-form">
         {% csrf_token %}
-        <div class="mb-3 d-flex align-items-center">
-            <label for="language-select" class="form-label me-2 mb-0"><strong>Select Language:</strong></label>
-            <select id="language-select" name="language" class="form-control" style="width: auto;" v-model="selectedLanguage">
-                <option value="python">Python</option>
-                <option value="c">C</option>
-                <option value="cpp">C++</option>
-                <option value="java">Java</option>
-                <option value="javascript">JavaScript</option>
+        <div class="mb-3">
+            <label for="language-select" class="form-label"><strong>Select Language:</strong></label>
+            <select id="language-select" name="language" class="form-control mb-2">
+                {% for lang in 'python,c,cpp,java,javascript'|split:',' %}
+                    <option value="{{ lang }}" {% if selected_language == lang %}selected{% endif %}>{{ lang|capfirst }}</option>
+                {% endfor %}
             </select>
         </div>
 
         <textarea id="code-editor" name="code">{{ code|escape }}</textarea>
-
-        <button type="button" @click="submitCode" class="btn btn-primary mt-2" :disabled="isLoading">
-            <span v-if="isLoading" class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-            <span v-else>Submit</span>
-        </button>
-    </div>
+        <button type="submit" class="btn btn-primary mt-2">Submit</button>
+    </form>
 
     <hr>
     <h4 class="mt-4">Try with Custom Input</h4>
@@ -40,7 +48,7 @@
 
     <pre id="custom-output" class="bg-light border p-3 mt-3" style="white-space: pre-wrap;"></pre>
 
-    <div v-if="results" class="mt-4">
+    {% if results %}
         <h3 class="mt-4">Test Case Results:</h3>
         <div class="table-responsive">
             <table class="table table-bordered">
@@ -48,152 +56,119 @@
                     <tr>
                         <th>Input</th>
                         <th>Expected Output</th>
-                        <th>Your Output</th>
+                        <th>Actual Output</th>
                         <th>Status</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="(result, index) in results">
-                        <td><pre>${ result.input }</pre></td>
-                        <td><pre>${ result.expected_output.join('\n') }</pre></td>
-                        <td><pre>${ result.actual_output.join('\n') }</pre></td>
-                        <td :class="result.status === 'Accepted' ? 'text-success' : 'text-danger'">
-                            ${ result.status }
-                            <pre v-if="result.error_message">${ result.error_message }</pre>
+                    {% for result in results %}
+                    <tr>
+                        <td><pre>{{ result.input }}</pre></td>
+                        <td><pre>{% for line in result.expected_output %}{{ line }}{% if not forloop.last %}\n{% endif %}{% endfor %}</pre></td>
+                        <td><pre>{% for line in result.actual_output %}{{ line }}{% if not forloop.last %}\n{% endif %}{% endfor %}</pre></td>
+                        <td class="{% if result.status == 'Accepted' %}text-success{% else %}text-danger{% endif %}">
+                            {{ result.status }}
+                            {% if result.error_message %}
+                                <pre>{{ result.error_message }}</pre>
+                            {% endif %}
                         </td>
                     </tr>
+                    {% endfor %}
                 </tbody>
             </table>
         </div>
-    </div>
-    
-    <div v-if="errorOutput" class="alert alert-danger mt-4">
-        <h3 class="mt-4 text-danger">Error:</h3>
-        <pre class="bg-light p-3 text-danger">${ errorOutput }</pre>
-    </div>
-
+    {% endif %}
 </div>
 {% endblock %}
-
 {% block extra_js %}
-<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-
 <script>
-    // This is the existing CodeMirror setup from your file
     const languageModes = {
         "python": "python", "c": "text/x-csrc", "cpp": "text/x-c++src",
         "java": "text/x-java", "javascript": "javascript"
     };
 
-    const textarea = document.getElementById("code-editor");
-    const languageSelect = document.getElementById("language-select");
+    document.addEventListener("DOMContentLoaded", function () {
+        const textarea = document.getElementById("code-editor");
+        const form = document.getElementById("code-submit-form");
+        const submitBtn = form.querySelector("button[type='submit']");
+        const languageSelect = document.getElementById("language-select");
 
-    const editor = CodeMirror.fromTextArea(textarea, {
-        mode: languageModes[languageSelect.value] || "python",
-        lineNumbers: true,
-        theme: "dracula",
-        indentUnit: 4,
-        matchBrackets: true,
-        autoCloseBrackets: true,
-        extraKeys: { "Ctrl-Space": "autocomplete" }
-    });
+        const editor = CodeMirror.fromTextArea(textarea, {
+            mode: languageModes[languageSelect.value] || "python",
+            lineNumbers: true,
+            theme: "dracula",
+            indentUnit: 4,
+            matchBrackets: true,
+            autoCloseBrackets: true, // Enables auto-completion
+            extraKeys: { "Ctrl-Space": "autocomplete" }
+        });
 
-    // --- Vue Application ---
-    const { createApp } = Vue;
+        // --- THIS IS THE FIX FOR COPY/PASTE ---
+        const editorWrapper = editor.getWrapperElement();
+        editorWrapper.addEventListener('cut', (e) => e.preventDefault());
+        editorWrapper.addEventListener('copy', (e) => e.preventDefault());
+        editorWrapper.addEventListener('paste', (e) => e.preventDefault());
+        
+        window.editor = editor;
 
-    createApp({
-        delimiters: ['${', '}'], // To avoid conflict with Django
-        data() {
-            return {
-                code: `{{ code|escapejs }}`,
-                selectedLanguage: '{{ selected_language }}',
-                isLoading: false,
-                results: null,
-                errorOutput: null,
-                questionId: {{ question.id }}
+        // --- THIS IS THE CORRECTED PART ---
+        form.addEventListener("submit", function (e) {
+            textarea.value = editor.getValue();
+
+            if (!editor.getValue().trim()) {
+                e.preventDefault(); // Prevent submission if code is empty
+                alert("Code cannot be empty!");
+                return;
             }
-        },
-        mounted() {
-            editor.setValue(this.code);
-            editor.on("change", (instance) => {
-                this.code = instance.getValue();
+
+            // Show loading state when form is submitted
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = `
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    Executing...
+                `;
+            }
+        });
+
+        languageSelect.addEventListener("change", function () {
+            editor.setOption("mode", languageModes[this.value]);
+        });
+
+        // Custom run button logic (no changes needed here)
+        const runBtn = document.getElementById("run-custom-btn");
+        const outputBox = document.getElementById("custom-output");
+        const customInputBox = document.getElementById("custom-input");
+
+        runBtn.addEventListener("click", () => {
+            const code = editor.getValue();
+            const language = languageSelect.value;
+            const custom_input = customInputBox.value;
+
+            outputBox.textContent = "⏳ Running...";
+
+            fetch("{% url 'run_code' %}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRFToken": "{{ csrf_token }}" },
+                body: JSON.stringify({ code: code, language: language, stdin: custom_input })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    outputBox.textContent = `❌ Error:\n${data.error}`;
+                } else {
+                    outputBox.textContent = `✅ Output:\n${data.output}`;
+                }
+            })
+            .catch(err => {
+                outputBox.textContent = "⚠️ Failed to execute code.";
+                console.error(err);
             });
-            languageSelect.addEventListener("change", () => {
-                this.selectedLanguage = languageSelect.value;
-            });
-        },
-        methods: {
-            submitCode() {
-                this.isLoading = true;
-                this.results = null;
-                this.errorOutput = null;
-
-                const apiUrl = `/api/execute/${this.questionId}/`;
-                const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
-
-                axios.post(apiUrl, {
-                    code: this.code,
-                    language: this.selectedLanguage,
-                }, {
-                    headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' }
-                })
-                .then(response => {
-                    if (response.data.success) {
-                        this.results = response.data.results;
-                        this.errorOutput = response.data.error_output;
-                    } else {
-                        this.errorOutput = response.data.error || "An unknown error occurred.";
-                    }
-                })
-                .catch(error => {
-                    console.error("An error occurred:", error);
-                    this.errorOutput = "An API error occurred. Please check the console.";
-                })
-                .finally(() => {
-                    this.isLoading = false;
-                });
-            }
-        },
-        watch: {
-            selectedLanguage(newLang) {
-                editor.setOption("mode", languageModes[newLang]);
-            }
-        }
-    }).mount('#vue-app');
-
-    // This is the existing "Run Code" logic from your file - no changes needed here.
-    const runBtn = document.getElementById("run-custom-btn");
-    const outputBox = document.getElementById("custom-output");
-    const customInputBox = document.getElementById("custom-input");
-
-    runBtn.addEventListener("click", () => {
-        const code = editor.getValue();
-        const language = languageSelect.value;
-        const custom_input = customInputBox.value;
-
-        outputBox.textContent = "⏳ Running...";
-
-        fetch("{% url 'run_code' %}", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-CSRFToken": "{{ csrf_token }}" },
-            body: JSON.stringify({ code: code, language: language, stdin: custom_input })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.error) {
-                outputBox.textContent = `❌ Error:\n${data.error}`;
-            } else {
-                outputBox.textContent = `✅ Output:\n${data.output}`;
-            }
-        })
-        .catch(err => {
-            outputBox.textContent = "⚠️ Failed to execute code.";
-            console.error(err);
         });
     });
-
 </script>
+
+{{ code|json_script:"initial-code" }}
 {% endblock %}
 
 {% block extra_css %}
