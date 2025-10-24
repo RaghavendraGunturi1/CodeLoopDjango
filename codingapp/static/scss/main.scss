@@ -1,5 +1,3 @@
-// main.scss
-
 // Sass built-in module
 @use "sass:color";
 
@@ -7,16 +5,19 @@
 @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap');
 
 // -- Color Palette --
-$primary:       #00f0ff;  // Bright Cyan
-$secondary:     #8A2BE2;  // Electric Violet
-$light:         #1a202c;  // Dark Gray for component backgrounds
-$dark:          #0d1117;  // Deep Space Black for main background
-$success:       #00ff7f;  // Neon Green
-$danger:        #ff2d55;  // Neon Pink/Red
+$primary:       #00f0ff;    // Bright Cyan
+$secondary:     #8A2BE2;    // Electric Violet
+$light:         #1a202c;    // Dark Gray for component backgrounds
+$dark:          #0d1117;    // Deep Space Black for main background
+$success:       #00ff7f;    // Neon Green
+$danger:        #ff2d55;    // Neon Pink/Red
 $info:          $primary;
 $body-bg:       $dark;
-$body-color:    #a0aec0;  // Light gray for general text
-$headings-color:#e2e8f0;  // Lighter gray for headings
+$body-color:    #a0aec0;    // Light gray for general text
+$headings-color:#e2e8f0;    // Lighter gray for headings
+
+// NEW: Missing variable needed for dark backgrounds
+$muted-bg:      #21262d; 
 
 // -- Links --
 $link-color: $primary;
@@ -45,7 +46,7 @@ $headings-font-family:   'Roboto Mono', monospace;
 @import "../../../node_modules/bootstrap/scss/bootstrap";
 
 
-// 3. Add Custom Styles and Futuristic Polish
+// 3. Custom Global Styles and Polish
 body {
     backdrop-filter: blur(5px);
 }
@@ -65,4 +66,110 @@ body {
     border-left: 3px solid $primary !important;
     color: #fff !important;
     text-shadow: 0 0 5px rgba($primary, 0.7);
+}
+
+// ------------------------------------------------
+// 4. MAIN CONTENT CONTRAST FIX
+// ------------------------------------------------
+
+$content-bg-dark: color.adjust($dark, $lightness: 2%); 
+$card-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+
+// This targets the main content container (needs to be applied in Django template!)
+.main-content-card {
+    
+    // Gradient for softer blend
+    background-image: linear-gradient(
+        180deg, 
+        $content-bg-dark 0%, 
+        $dark 100%
+    ) !important;
+    
+    // Soften edges and add depth
+    border: 1px solid rgba($border-color, 0.5) !important;
+    border-radius: $border-radius * 2;
+    box-shadow: $card-shadow;
+    padding: 2rem; 
+    margin-bottom: 2rem; 
+    
+    // Cohesive form element styling
+    input, textarea, select {
+        background-color: color.adjust($content-bg-dark, $lightness: 5%) !important;
+        border-color: $border-color !important;
+        color: $headings-color !important;
+    }
+
+    input:focus, textarea:focus, select:focus {
+        border-color: $primary !important;
+        box-shadow: 0 0 5px rgba($primary, 0.5) !important;
+    }
+}
+
+
+// ------------------------------------------------
+// 7. FLOATING LAMP NAVBAR STYLES
+// ------------------------------------------------
+
+.floating-nav-wrapper {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    padding: 0.5rem;
+    
+    background-color: rgba($dark, 0.7);
+    border: 1px solid rgba($primary, 0.2);
+    backdrop-filter: blur(10px);
+    border-radius: 50px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.floating-nav-list {
+    display: flex;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    position: relative;
+    align-items: center;
+}
+
+.floating-nav-list .nav-item {
+    position: relative;
+    z-index: 2;
+}
+
+.floating-nav-list .nav-link {
+    display: block;
+    padding: 0.5rem 1.25rem;
+    border-radius: 50px;
+    color: $body-color;
+    transition: color 0.3s;
+    font-weight: bold;
+    text-decoration: none;
+}
+
+.floating-nav-list .nav-link:hover {
+    color: $primary;
+}
+
+/* The Moving Indicator (The "Lamp") */
+#nav-indicator {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background-color: rgba($primary, 0.1);
+    border-radius: 50px;
+    box-shadow: 0 0 10px rgba($primary, 0.4);
+    
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+                transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1;
+    pointer-events: none;
+}
+
+/* Style for the active link text, since the indicator handles the background */
+.floating-nav-list .nav-link.active {
+    color: $primary; 
 }

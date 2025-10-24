@@ -8,23 +8,23 @@
 <div class="card p-4">
 
     <!-- User Profile Section -->
-    <div class="d-flex align-items-center mb-4">
-        {% if profile and profile.profile_picture %}
-            <img src="{{ profile.profile_picture.url }}" alt="Profile Picture"
-                 class="rounded-circle me-3" width="80" height="80">
-        {% else %}
-            <img src="/static/default-profile.png" alt="Profile Picture"
-                 class="rounded-circle me-3" width="80" height="80">
-        {% endif %}
-        <div>
-            <h2 class="mb-0">
-                <h2>Welcome, {{ user.first_name }} {{ user.last_name }}!</h2>
-
-            </h2>
-            <p class="mb-1 text-muted">Roll Number: {{ user.username }}</p>
-            <p class="mb-0">Email: {{ user.email|default:"Not provided" }}</p>
-        </div>
+   {% load static %}
+<div class="d-flex align-items-center mb-4">
+    {% if profile and profile.profile_picture %}
+        <img src="{{ profile.profile_picture.url }}" alt="Profile Picture"
+             class="rounded-circle me-3" width="80" height="80" style="object-fit: cover;">
+    {% else %}
+        <img src="{% static 'images/default_profile.png' %}" alt="Profile Picture"
+             class="rounded-circle me-3" width="80" height="80" style="object-fit: cover;">
+    {% endif %}
+    <div>
+        <h2 class="mb-0" style="color: var(--headings-color);">
+            Welcome, {{ user.first_name }} {{ user.last_name }}!
+        </h2>
+        <p class="mb-1 text-muted">Roll Number: {{ user.username }}</p>
+        <p class="mb-0 text-muted">Email: {{ user.email|default:"Not provided" }}</p>
     </div>
+</div>
     <!-- End User Profile Section -->
 
     <h3>Your Past Submissions</h3>

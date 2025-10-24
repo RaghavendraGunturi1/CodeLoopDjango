@@ -3,10 +3,16 @@
 {% block title %}Leaderboard - {{ assessment.title }}{% endblock %}
 
 {% block content %}
-<div class="card p-4">
-    <div class="text-center mb-4">
-        <h2>🏆 Leaderboard</h2>
-        <p class="lead">Showing results for <strong>{{ assessment.title }}</strong></p>
+<div class="main-content-card p-4">
+    
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="text-primary m-0">🏆 Leaderboard: <strong>{{ assessment.title }}</strong></h4>
+        
+        {% if request.user.is_staff %}
+        <a href="{% url 'export_assessment_leaderboard_csv' assessment_id=assessment.id %}" class="btn btn-outline-success">
+            <i class="bi bi-file-earmark-spreadsheet me-1"></i> Export to CSV
+        </a>
+        {% endif %}
     </div>
 
     <div class="table-responsive">
@@ -18,7 +24,8 @@
             <th scope="col">Quiz Score</th>
             <th scope="col">Coding Score</th>
             <th scope="col">Total Score</th>
-            <th scope="col">Time Taken</th> </tr>
+            <th scope="col">Time Taken</th> 
+        </tr>
     </thead>
     <tbody>
         {% for entry in leaderboard %}
@@ -29,8 +36,8 @@
             <td>{{ entry.coding_score }}</td>
             <td><strong>{{ entry.total_score }}</strong></td>
             <td>
-                {% if entry.time_taken %}
-                    {{ entry.time_taken }}
+                {% if entry.time_taken_str %}
+                    {{ entry.time_taken_str }}
                 {% else %}
                     N/A
                 {% endif %}

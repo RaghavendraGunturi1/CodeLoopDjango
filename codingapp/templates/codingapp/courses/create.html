@@ -3,8 +3,9 @@
 {% block content %}
 
 <div class="container">
-  <h2 class="mb-4">Create / Edit Course</h2>
-  <form method="post" class="p-4 border rounded bg-white shadow-sm" id="course-form">
+  <h4 class="mb-4 text-center text-decoration-underline text-primary">CREATE / EDIT COURSE</h4> 
+  
+  <form method="post" class="main-content-card" id="course-form">
     {% csrf_token %}
 
     <div class="row">
@@ -48,12 +49,12 @@
       </div>
     </div>
 
-    <hr>
-    <h4 class="mb-3">Course Content</h4>
+    <hr class="border-secondary">
+    <h4 class="mb-3 text-primary">Course Content</h4>
     {{ formset.management_form }}
     <div id="formset-container">
 {% for form in formset %}
-  <div class="border p-3 mb-3 rounded bg-light content-form">
+  <div class="p-3 mb-3 rounded border border-secondary content-form"> 
     {% for hidden in form.hidden_fields %}
       {{ hidden }}
     {% endfor %}
@@ -88,9 +89,8 @@
     <button type="submit" class="btn btn-success">Save</button>
   </form>
 
-  <!-- Empty template for JavaScript cloning -->
   <template id="empty-form-template">
-    <div class="border p-3 mb-3 rounded bg-light content-form">
+    <div class="p-3 mb-3 rounded border border-secondary content-form">
         <input type="hidden" name="contents-__prefix__-id" id="id_contents-__prefix__-id">
       <div class="row">
         <div class="col-md-6 mb-2">

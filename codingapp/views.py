@@ -11,7 +11,8 @@ from django.utils import timezone
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.conf import settings
-
+import csv # <--- NEW IMPORT
+from django.utils.text import slugify # <--- NEW IMPORT
 
 
 from .models import (
@@ -349,6 +350,7 @@ def question_detail(request, pk):
         "results": results,
         "error": error,
         "error_output": stderr,
+        "supported_languages": SUPPORTED_LANGUAGES, # <--- CRITICAL ADDITION
     })
 
 from django.views.decorators.http import require_POST
@@ -597,29 +599,60 @@ def assessment_leaderboard(request, assessment_id):
             quiz=assessment.quiz
         ).values('user__id', 'score')
         quiz_scores_dict = {item['user__id']: item['score'] for item in quiz_scores}
+    
+    # NEW: Fetch assessment sessions for time calculation
+    sessions = AssessmentSession.objects.filter(
+        assessment=assessment, user__in=participants, end_time__isnull=False
+    ).select_related('user')
+    
+    session_times_dict = {}
+    for session in sessions:
+        if session.end_time and session.start_time:
+            # Calculate duration (timedelta)
+            duration = session.end_time - session.start_time
+            # Format duration into human-readable string
+            total_seconds = int(duration.total_seconds())
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+            time_str = f"{hours}h {minutes}m {seconds}s"
+            # Use total seconds as a sort key
+            session_times_dict[session.user_id] = {'duration': duration, 'time_str': time_str, 'sort_key': total_seconds}
+        else:
+             session_times_dict[session.user_id] = {'duration': None, 'time_str': "N/A", 'sort_key': float('inf')}
 
-    # Combine the scores for every participant
+
+    # Combine the scores and times for every participant
     leaderboard_data = []
     for user in participants:
         quiz_score = quiz_scores_dict.get(user.id, 0)
         coding_score = coding_scores_dict.get(user.id, 0)
         total_score = quiz_score + coding_score
+        
+        time_info = session_times_dict.get(user.id, {'duration': None, 'time_str': "N/A", 'sort_key': float('inf')})
+        
+        # Only include users who have scored something or have an attempted time
+        if total_score > 0 or time_info['duration'] is not None:
+             leaderboard_data.append({
+                'username': user.username,
+                'quiz_score': quiz_score,
+                'coding_score': coding_score,
+                'total_score': total_score,
+                'time_taken_str': time_info['time_str'],
+                'time_taken_seconds': time_info['sort_key'],
+             })
 
-        leaderboard_data.append({
-            'username': user.username,
-            'quiz_score': quiz_score,
-            'coding_score': coding_score,
-            'total_score': total_score,
-        })
+    # Sort the final list by total score (desc) then time taken (asc)
+    leaderboard_data.sort(key=lambda x: (-x['total_score'], x['time_taken_seconds']))
 
-    # Sort the final list by total score in descending order
-    leaderboard_data.sort(key=lambda x: x['total_score'], reverse=True)
 
     context = {
         "assessment": assessment,
         "leaderboard": leaderboard_data
     }
     return render(request, "codingapp/assessment_leaderboard.html", context)
+
+
 from django.contrib import messages
 from django.shortcuts import render, get_object_or_404, redirect
 from django.utils import timezone
@@ -1914,3 +1947,86 @@ def execute_code_api(request, question_id):
     except Exception as e:
         logger.error(f"Error in execute_code_api: {e}", exc_info=True)
         return JsonResponse({"success": False, "error": "An unexpected server error occurred."}, status=500)
+
+        # NEW FUNCTION: Export Assessment Leaderboard to CSV
+@user_passes_test(is_admin_or_teacher)
+def export_assessment_leaderboard_csv(request, assessment_id):
+    assessment = get_object_or_404(Assessment, id=assessment_id)
+
+    # 1. Fetch and Calculate Data (Same core logic as assessment_leaderboard)
+    participant_ids = assessment.groups.prefetch_related('students').values_list('students', flat=True).distinct()
+    participants = User.objects.filter(id__in=participant_ids)
+
+    coding_scores = AssessmentSubmission.objects.filter(
+        assessment=assessment
+    ).values('user__id').annotate(total_coding_score=Sum('score'))
+    coding_scores_dict = {item['user__id']: item['total_coding_score'] for item in coding_scores}
+
+    quiz_scores_dict = {}
+    if assessment.quiz:
+        quiz_scores = QuizSubmission.objects.filter(
+            quiz=assessment.quiz
+        ).values('user__id', 'score')
+        quiz_scores_dict = {item['user__id']: item['score'] for item in quiz_scores}
+
+    sessions = AssessmentSession.objects.filter(
+        assessment=assessment, user__in=participants, end_time__isnull=False
+    ).select_related('user')
+    
+    session_times_dict = {}
+    # 
+    for session in sessions:
+        if session.end_time and session.start_time:
+            duration = session.end_time - session.start_time
+            total_seconds = int(duration.total_seconds())
+            # Time in minutes for CSV
+            time_minutes = round(total_seconds / 60, 2)
+            session_times_dict[session.user_id] = {'minutes': time_minutes}
+
+    leaderboard_data = []
+    # 
+    for user in participants:
+        quiz_score = quiz_scores_dict.get(user.id, 0)
+        coding_score = coding_scores_dict.get(user.id, 0)
+        total_score = quiz_score + coding_score
+        
+        time_minutes = session_times_dict.get(user.id, {}).get('minutes', 'N/A')
+        
+        # Only include users who have scored something or have a submission time
+        if total_score > 0 or time_minutes != 'N/A':
+            # Use total_score for sorting, time_minutes for the CSV output
+            leaderboard_data.append({
+                'username': user.username,
+                'quiz_score': quiz_score,
+                'coding_score': coding_score,
+                'total_score': total_score,
+                'time_taken_minutes': time_minutes,
+                'sort_key': time_minutes if isinstance(time_minutes, (int, float)) else float('inf')
+            })
+
+    # Sort the final list by total score (desc) then time taken (asc) for accurate ranking
+    leaderboard_data.sort(key=lambda x: (-x['total_score'], x['sort_key']))
+
+    # 2. Configure the HTTP response for CSV download
+    response = HttpResponse(content_type='text/csv')
+    filename = slugify(assessment.title)
+    response['Content-Disposition'] = f'attachment; filename="{filename}_leaderboard.csv"'
+
+    # 3. Create the CSV writer object
+    writer = csv.writer(response)
+
+    # 4. Write the header row
+    writer.writerow(['Rank', 'Username', 'Quiz Score', 'Coding Score', 'Total Score', 'Time Taken (Minutes)'])
+
+    # 5. Write data rows
+    for rank, entry in enumerate(leaderboard_data, 1):
+        writer.writerow([
+            rank,
+            entry['username'],
+            entry['quiz_score'],
+            entry['coding_score'],
+            entry['total_score'],
+            entry['time_taken_minutes'],
+        ])
+
+    return response

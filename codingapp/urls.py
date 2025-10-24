@@ -36,6 +36,7 @@ urlpatterns = [
     path("assessments/<int:assessment_id>/questions/<int:question_id>/submit/", views.submit_assessment_code, name="submit_assessment_code"),
     path("assessments/<int:assessment_id>/result/", views.assessment_result, name="assessment_result"), # <-- ADD THIS LINE
     path("assessments/leaderboards/", views.assessment_leaderboard_list, name="assessment_leaderboard_list"), # <-- ADD THIS LINE
+    path("assessments/<int:assessment_id>/leaderboard/export/csv/", views.export_assessment_leaderboard_csv, name="export_assessment_leaderboard_csv"),
 
     # Teacher: Module Management
     path('teacher/modules/', views.teacher_module_list, name='teacher_module_list'),

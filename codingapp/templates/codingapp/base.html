@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en" data-theme="dark"> 
+<html lang="en" data-bs-theme="dark"> 
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14,7 +14,8 @@
     
     <style>
         body {
-            padding-top: 70px;
+            /* Adjust padding-top for the new fixed floating navbar */
+            padding-top: 90px; 
             /* Use CSS variables defined in main.scss */
             background-color: var(--body-bg, #0d1117); 
             transition: background-color 0.3s ease;
@@ -52,6 +53,10 @@
             -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
             -webkit-mask-composite: xor; mask-composite: exclude;
         }
+        /* We rely on the SCSS for .floating-nav-list .nav-link.active, but this is a CSS variable fallback */
+        .floating-nav-list .nav-link.active {
+             color: var(--primary, #00f0ff);
+        }
     </style>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
@@ -71,68 +76,63 @@
         <div class="grid-container"></div>
     </div>
 
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top" style="background-color: var(--navbar-bg, rgba(13, 17, 23, 0.8)) !important; backdrop-filter: blur(10px); z-index: 10;">
-        <div class="container-fluid">
-            <a class="navbar-brand d-flex align-items-center" href="{% url 'home' %}">
-                <img src="{% static 'images/logo.png' %}" alt="CodeLoop Logo" style="height: 32px;" class="me-2">
-                <span class="fw-bold">CodeLoop</span>
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-                    {% if user.is_authenticated %}
-                        <li class="nav-item"><a class="nav-link {% if request.path == '/dashboard/' %}active{% endif %}" href="{% url 'dashboard' %}"><i class="bi bi-speedometer2 me-1"></i> Dashboard</a></li>
-                        <li class="nav-item"><a class="nav-link {% if '/modules/' in request.path %}active{% endif %}" href="{% url 'module_list' %}"><i class="bi bi-box-seam me-1"></i> Modules</a></li>
-                        <li class="nav-item"><a class="nav-link {% if '/questions/' in request.path %}active{% endif %}" href="{% url 'question_list' %}"><i class="bi bi-question-circle me-1"></i> Practice</a></li>
-                        <li class="nav-item"><a class="nav-link {% if '/assessments/' in request.path %}active{% endif %}" href="{% url 'assessment_list' %}"><i class="bi bi-check2-square me-1"></i> Assessments</a></li>
-                        <li class="nav-item"><a class="nav-link {% if '/courses/' in request.path %}active{% endif %}" href="{% url 'course_list' %}"><i class="bi bi-journal-code me-1"></i>Courses</a></li>
-                        <li class="nav-item"><a class="nav-link {% if '/leaderboards/' in request.path %}active{% endif %}" href="{% url 'assessment_leaderboard_list' %}"><i class="bi bi-trophy me-1"></i> Leaderboards</a></li>
-                        {% if user.is_staff %}
-                        <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-gear me-1"></i> Manage</a>
-                            <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="navbarDropdown">
-                                <li><a class="dropdown-item" href="{% url 'teacher_module_list' %}">Manage Modules</a></li>
-                                <li><a class="dropdown-item" href="{% url 'teacher_question_list' %}">Manage Questions</a></li>
-                                <li><a class="dropdown-item" href="{% url 'teacher_assessment_list' %}">Manage Assessments</a></li>
-                                <li><a class="dropdown-item" href="{% url 'teacher_group_list' %}">Manage Groups</a></li>
-                                <li><a class="dropdown-item" href="{% url 'manage_courses' %}">Manage Courses</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item" href="{% url 'student_performance_list' %}">Student Performance</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item" href="{% url 'bulk_user_upload' %}">Bulk User Upload</a></li>
-                                <li><a class="dropdown-item" href="{% url 'bulk_mcq_upload' %}">Bulk MCQ Upload</a></li>
-                            </ul>
+    <div class="floating-nav-wrapper">
+        <ul class="floating-nav-list" id="floating-nav">
+            <div id="nav-indicator"></div>
+
+            <li class="nav-item me-3">
+                <a class="nav-link" href="{% url 'home' %}">
+                    <img src="{% static 'images/logo.png' %}" alt="CodeLoop Logo" style="height: 24px; vertical-align: middle;" class="me-1">
+                    <span class="fw-bold d-none d-lg-inline">CodeLoop</span>
+                </a>
+            </li>
+
+            {% if user.is_authenticated %}
+                <li class="nav-item"><a class="nav-link" href="{% url 'dashboard' %}"><i class="bi bi-speedometer2 me-1"></i> Dashboard</a></li>
+                <li class="nav-item"><a class="nav-link" href="{% url 'module_list' %}"><i class="bi bi-box-seam me-1"></i> Modules</a></li>
+                <li class="nav-item"><a class="nav-link" href="{% url 'question_list' %}"><i class="bi bi-question-circle me-1"></i> Practice</a></li>
+                <li class="nav-item"><a class="nav-link" href="{% url 'assessment_list' %}"><i class="bi bi-check2-square me-1"></i> Assessments</a></li>
+                <li class="nav-item"><a class="nav-link" href="{% url 'assessment_leaderboard_list' %}"><i class="bi bi-trophy me-1"></i> Leaderboards</a></li>
+                
+                {% if user.is_staff %}
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-gear me-1"></i> Manage</a>
+                        <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="navbarDropdown">
+                            <li><a class="dropdown-item" href="{% url 'teacher_module_list' %}">Manage Modules</a></li>
+                            <li><a class="dropdown-item" href="{% url 'teacher_question_list' %}">Manage Questions</a></li>
+                            <li><a class="dropdown-item" href="{% url 'teacher_assessment_list' %}">Manage Assessments</a></li>
+                            <li><a class="dropdown-item" href="{% url 'teacher_group_list' %}">Manage Groups</a></li>
+                            <li><a class="dropdown-item" href="{% url 'manage_courses' %}">Manage Courses</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{% url 'student_performance_list' %}">Student Performance</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{% url 'bulk_user_upload' %}">Bulk User Upload</a></li>
+                            <li><a class="dropdown-item" href="{% url 'bulk_mcq_upload' %}">Bulk MCQ Upload</a></li>
+                        </ul>
+                    </li>
+                {% endif %}
+                
+                <li class="nav-item dropdown ms-3">
+                    <a class="nav-link dropdown-toggle" href="#" id="profileDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-person-circle me-1"></i> {{ user.username }}</a>
+                    <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="profileDropdown">
+                        <li><a class="dropdown-item" href="{% url 'edit_profile' %}">My Profile</a></li>
+                        <li><a class="dropdown-item" href="{% url 'notice_list' %}">Notice Board {% if unread_notice_count and unread_notice_count > 0 %}<span class="badge bg-danger ms-1">{{ unread_notice_count }}</span>{% endif %}</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <form method="post" action="{% url 'logout' %}" class="d-inline">
+                                {% csrf_token %}
+                                <button type="submit" class="dropdown-item"><i class="bi bi-box-arrow-right me-1"></i> Logout</button>
+                            </form>
                         </li>
-                        {% endif %}
-                    {% endif %}
-                </ul>
-                <ul class="navbar-nav ms-auto align-items-center">
-                     {% if user.is_authenticated %}
-                        <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" id="profileDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-person-circle me-1"></i> {{ user.username }}</a>
-                            <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="profileDropdown">
-                                <li><a class="dropdown-item" href="{% url 'edit_profile' %}">My Profile</a></li>
-                                <li><a class="dropdown-item" href="{% url 'notice_list' %}">Notice Board {% if unread_notice_count and unread_notice_count > 0 %}<span class="badge bg-danger ms-1">{{ unread_notice_count }}</span>{% endif %}</a></li>
-                                <li><hr class="dropdown-divider"></li>
-                                <li>
-                                    <form method="post" action="{% url 'logout' %}" class="d-inline">
-                                        {% csrf_token %}
-                                        <button type="submit" class="dropdown-item"><i class="bi bi-box-arrow-right me-1"></i> Logout</button>
-                                    </form>
-                                </li>
-                            </ul>
-                        </li>
-                    {% else %}
-                        <li class="nav-item"><a class="nav-link" href="{% url 'login' %}">Login</a></li>
-                         <li class="nav-item"><a class="nav-link" href="{% url 'register' %}">Register</a></li>
-                    {% endif %}
-                </ul>
-            </div>
-        </div>
-    </nav>
-    
+                    </ul>
+                </li>
+
+            {% else %}
+                <li class="nav-item"><a class="nav-link" href="{% url 'login' %}"><i class="bi bi-box-arrow-in-right me-1"></i> Login</a></li>
+                <li class="nav-item"><a class="nav-link" href="{% url 'register' %}"><i class="bi bi-person-add me-1"></i> Register</a></li>
+            {% endif %}
+        </ul>
+    </div>
     <div class="main-content container-fluid">
         {% block content %}{% endblock %}
     </div>
@@ -142,31 +142,118 @@
 
     <script>
         document.addEventListener("DOMContentLoaded", function() {
-            const container = document.querySelector("#boxes-background .grid-container");
-            if (!container) return;
-            const rows = 30, cols = 30;
-            const colors = ["rgb(125 211 252)", "rgb(249 168 212)", "rgb(134 239 172)", "rgb(253 224 71)", "rgb(252 165 165)", "rgb(216 180 254)", "rgb(147 197 253)", "rgb(165 180 252)", "rgb(196 181 253)"];
-            const getRandomColor = () => colors[Math.floor(Math.random() * colors.length)];
-            let output = "";
-            for (let i = 0; i < rows; i++) {
-                output += '<div class="grid-row">';
-                for (let j = 0; j < cols; j++) { output += '<div class="box"></div>'; }
-                output += '</div>';
+            // Helper function to clean up paths for comparison
+            const cleanPath = (path) => path?.replace(/\/$/, '') || '';
+
+            // --- Floating Lamp Navbar Script ---
+            const navList = document.getElementById('floating-nav');
+            const indicator = document.getElementById('nav-indicator');
+            // Select only the direct <a> links that have a simple navigation role
+            const navLinks = navList.querySelectorAll('.nav-link:not([data-bs-toggle="dropdown"])');
+
+            // Django URL paths (cleaned) for comparison
+            const dashboardPath = cleanPath('{% url "dashboard" %}');
+            const homePath = cleanPath('{% url "home" %}');
+            
+            function moveIndicator(target) {
+                if (!target) return;
+
+                const targetRect = target.getBoundingClientRect();
+                const listRect = navList.getBoundingClientRect();
+
+                // Calculate width and horizontal offset
+                const width = targetRect.width;
+                const offsetLeft = targetRect.left - listRect.left;
+
+                indicator.style.width = `${width}px`;
+                indicator.style.transform = `translateX(${offsetLeft}px)`;
+
+                // Remove active class from ALL links that move the indicator
+                navLinks.forEach(link => link.classList.remove('active'));
+                
+                // Set active class on the target link
+                target.classList.add('active');
             }
-            container.innerHTML = output;
-            const boxes = document.querySelectorAll(".box");
-            boxes.forEach(box => {
-                box.addEventListener("mouseover", () => { box.style.backgroundColor = getRandomColor(); });
-                box.addEventListener("mouseout", () => {
-                    setTimeout(() => { box.style.transition = 'background-color 2s'; box.style.backgroundColor = "transparent"; }, 200);
-                    setTimeout(() => { box.style.transition = 'background-color 0s'; }, 2200);
+
+            // 1. Initial positioning on load
+            const currentPath = cleanPath(window.location.pathname);
+            let activeLink = null;
+
+            // Find the best link match
+            navLinks.forEach(link => {
+                const linkPath = cleanPath(link.getAttribute('href'));
+                
+                // Priority 1: Exact match
+                if (linkPath === currentPath) {
+                    activeLink = link;
+                }
+                // Priority 2: Partial matches for detail/edit/view pages
+                else if (linkPath !== homePath && linkPath.length > 1 && currentPath.startsWith(linkPath)) {
+                    // Only assign if we haven't found a better exact match
+                    if (!activeLink || cleanPath(activeLink.getAttribute('href')).length < linkPath.length) {
+                         activeLink = link;
+                    }
+                }
+            });
+
+            // Priority 3: Fallback for home/dashboard
+            if (!activeLink && (currentPath === homePath || currentPath === dashboardPath || currentPath === '/')) {
+                // Ensure the 'Dashboard' link is targeted if a user is logged in
+                activeLink = navList.querySelector(`a[href="${dashboardPath}"]`);
+            }
+            
+            // If the active link is found, move the indicator to it
+            if (activeLink) {
+                moveIndicator(activeLink);
+            } else {
+                // Hide the indicator if no link is active (e.g., on a 404 page)
+                indicator.style.width = '0px';
+            }
+
+
+            // 2. Add event listeners for dynamic movement on click
+            navLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    // Only move the indicator for simple links
+                    if (!e.currentTarget.classList.contains('dropdown-toggle')) {
+                        moveIndicator(e.currentTarget);
+                    }
                 });
             });
-        });
-    </script>
-    
-    <script>
-        document.addEventListener("DOMContentLoaded", function() {
+
+            // 3. Recalculate indicator position on window resize
+            window.addEventListener('resize', () => {
+                const currentActive = navList.querySelector('.nav-link.active');
+                if (currentActive) {
+                    moveIndicator(currentActive);
+                }
+            });
+
+            // --- Background Boxes Script ---
+            const container = document.querySelector("#boxes-background .grid-container");
+            if (container) {
+                const rows = 30, cols = 30;
+                const colors = ["rgb(125 211 252)", "rgb(249 168 212)", "rgb(134 239 172)", "rgb(253 224 71)", "rgb(252 165 165)", "rgb(216 180 254)", "rgb(147 197 253)", "rgb(165 180 252)", "rgb(196 181 253)"];
+                const getRandomColor = () => colors[Math.floor(Math.random() * colors.length)];
+                let output = "";
+                for (let i = 0; i < rows; i++) {
+                    output += '<div class="grid-row">';
+                    for (let j = 0; j < cols; j++) { output += '<div class="box"></div>'; }
+                    output += '</div>';
+                }
+                container.innerHTML = output;
+                const boxes = document.querySelectorAll(".box");
+                boxes.forEach(box => {
+                    box.addEventListener("mouseover", () => { box.style.backgroundColor = getRandomColor(); });
+                    box.addEventListener("mouseout", () => {
+                        setTimeout(() => { box.style.transition = 'background-color 2s'; box.style.backgroundColor = "transparent"; }, 200);
+                        setTimeout(() => { box.style.transition = 'background-color 0s'; }, 2200);
+                    });
+                });
+            }
+            // --- End Background Boxes Script ---
+
+            // --- Glowing Border Script ---
             const glowCards = document.querySelectorAll(".glow-card");
             glowCards.forEach(card => {
                 card.addEventListener("pointermove", (e) => {
@@ -179,6 +266,7 @@
                 });
                 card.addEventListener("pointerleave", () => { card.style.setProperty('--active-opacity', '0'); });
             });
+            // --- End Glowing Border Script ---
         });
     </script>
 </body>

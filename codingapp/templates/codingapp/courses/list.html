@@ -1,16 +1,17 @@
 {% extends 'codingapp/base.html' %}
 {% block content %}
-<h2>Available Courses</h2>
-<div class="row">
-  {% for course in courses %}
-    <div class="card col-md-4 m-2 p-2">
-      <h4>{{ course.title }}</h4>
-      <p>{{ course.description|truncatewords:20 }}</p>
-      <span class="badge bg-info">{{ course.difficulty }}</span>
-      <a href="{% url 'course_detail' course.pk %}" class="btn btn-primary btn-sm mt-2">View</a>
-    </div>
-  {% empty %}
-    <p>No courses available.</p>
-  {% endfor %}
+<div class="main-content-card"> <h4 class="mb-4 text-primary text-center">AVAILABLE COURSES</h4>
+  <div class="row">
+    {% for course in courses %}
+      <div class="card col-md-4 m-2 p-2 bg-dark border-secondary">
+        <h5 class="card-title text-light">{{ course.title }}</h5>
+        <p class="card-text text-muted">{{ course.description|truncatewords:20 }}</p>
+        <span class="badge bg-info align-self-start">{{ course.difficulty }}</span>
+        <a href="{% url 'course_detail' course.pk %}" class="btn btn-primary btn-sm mt-2">View</a>
+      </div>
+    {% empty %}
+      <p class="text-light">No courses available.</p>
+    {% endfor %}
+  </div>
 </div>
 {% endblock %}

@@ -4,46 +4,105 @@
 {% block title %}{{ question.title }}{% endblock %}
 
 {% block content %}
-<div class="card p-4" id="vue-app">
-    <h2>{{ question.title }}</h2>
+<div class="main-content-card p-4">
+    
+    <h4 class="text-primary">{{ question.title }}</h4>
     <p>{{ question.description|linebreaksbr }}</p>
 
     <h3>Submit Your Code:</h3>
-    <div>
+    
+    <form id="submission-form" method="post"> 
         {% csrf_token %}
+        
         <div class="mb-3 d-flex align-items-center">
             <label for="language-select" class="form-label me-2 mb-0"><strong>Select Language:</strong></label>
-            <select id="language-select" name="language" class="form-control" style="width: auto;" v-model="selectedLanguage">
-                <option value="python">Python</option>
-                <option value="c">C</option>
-                <option value="cpp">C++</option>
-                <option value="java">Java</option>
-                <option value="javascript">JavaScript</option>
+            
+            <select id="language-select" name="language" class="form-control" style="width: auto;">
+                {% for lang_key in supported_languages %}
+                    <option value="{{ lang_key }}" {% if lang_key == selected_language %}selected{% endif %}>{{ lang_key|capfirst }}</option>
+                {% endfor %}
             </select>
         </div>
 
-        <textarea id="code-editor" name="code">{{ code|escape }}</textarea>
+        <textarea id="code-editor" name="code" style="display: none;">{{ code|escape }}</textarea>
 
-        <button type="button" @click="submitCode" class="btn btn-primary mt-2" :disabled="isLoading">
-            <span v-if="isLoading" class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-            <span v-else>Submit</span>
+        <button type="submit" id="submit-btn" class="btn btn-primary mt-2">
+            Submit Code
         </button>
+        <span id="submit-status" class="ms-3 text-warning d-none"></span>
+    </form>
+
+    <hr class="border-secondary">
+    
+    <h4 id="results-title" class="mt-4 text-primary d-none">Test Case Results:</h4>
+    <div id="results-container" class="table-responsive">
+        </div>
+    
+    <h4 class="mt-4 text-primary">Try with Custom Input</h4>
+    <div>
+        <div class="mb-3">
+            <label for="custom-input" class="form-label">Enter Custom Input</label>
+            <textarea id="custom-input" rows="4" class="form-control font-monospace" placeholder="Enter your input here..."></textarea>
+        </div>
+        <button id="run-custom-btn" class="btn btn-outline-secondary">Run Code</button>
+
+        <pre id="custom-output" class="bg-dark border border-secondary p-3 mt-3" style="white-space: pre-wrap;">Output will appear here.</pre>
     </div>
+</div>
+{% endblock %}
 
-    <hr>
-    <h4 class="mt-4">Try with Custom Input</h4>
-    <div class="mb-3">
-        <label for="custom-input" class="form-label">Enter Custom Input</label>
-        <textarea id="custom-input" rows="4" class="form-control font-monospace" placeholder="Enter your input here..."></textarea>
-    </div>
-    <button id="run-custom-btn" class="btn btn-outline-secondary">Run Code</button>
+{% block extra_js %}
+<script>
+    // --- Configuration ---
+    const languageModes = {
+        "python": "python", "c": "text/x-csrc", "cpp": "text/x-c++src",
+        "java": "text/x-java", "javascript": "javascript"
+    };
+    
+    const API_SUBMIT_URL = "{% url 'execute_code_api' question_id=question.id %}";
+    const API_RUN_URL = "{% url 'run_code' %}";
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    // --- DOM Elements ---
+    const submissionForm = document.getElementById('submission-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const submitStatus = document.getElementById('submit-status');
+    const languageSelect = document.getElementById("language-select");
+    const textarea = document.getElementById("code-editor");
+    const resultsTitle = document.getElementById('results-title');
+    const resultsContainer = document.getElementById('results-container');
+    
+    // --- CodeMirror Setup ---
+    const editor = CodeMirror.fromTextArea(textarea, {
+        mode: languageModes[languageSelect.value] || "python",
+        lineNumbers: true,
+        theme: "dracula",
+        indentUnit: 4,
+        matchBrackets: true,
+        autoCloseBrackets: true,
+        extraKeys: { "Ctrl-Space": "autocomplete" },
+        readOnly: false 
+    });
+    editor.setValue(textarea.value);
 
-    <pre id="custom-output" class="bg-light border p-3 mt-3" style="white-space: pre-wrap;"></pre>
-
-    <div v-if="results" class="mt-4">
-        <h3 class="mt-4">Test Case Results:</h3>
-        <div class="table-responsive">
-            <table class="table table-bordered">
+    // Sync language selection with CodeMirror
+    languageSelect.addEventListener("change", () => {
+        editor.setOption("mode", languageModes[languageSelect.value]);
+    });
+    
+    // --- Helper Function to Render Results ---
+    function renderResults(results) {
+        if (!results || results.length === 0) {
+            resultsTitle.classList.add('d-none');
+            resultsContainer.innerHTML = '';
+            return;
+        }
+        
+        resultsTitle.classList.remove('d-none');
+        
+        const isAllAccepted = results.every(r => r.status === 'Accepted');
+        let tableHtml = `
+            <table class="table table-bordered table-dark">
                 <thead class="thead-dark">
                     <tr>
                         <th>Input</th>
@@ -53,116 +112,91 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="(result, index) in results">
-                        <td><pre>${ result.input }</pre></td>
-                        <td><pre>${ result.expected_output.join('\n') }</pre></td>
-                        <td><pre>${ result.actual_output.join('\n') }</pre></td>
-                        <td :class="result.status === 'Accepted' ? 'text-success' : 'text-danger'">
-                            ${ result.status }
-                            <pre v-if="result.error_message">${ result.error_message }</pre>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-    
-    <div v-if="errorOutput" class="alert alert-danger mt-4">
-        <h3 class="mt-4 text-danger">Error:</h3>
-        <pre class="bg-light p-3 text-danger">${ errorOutput }</pre>
-    </div>
+        `;
+        
+        results.forEach(result => {
+            const statusClass = result.status === 'Accepted' ? 'text-success' : 
+                                result.status === 'Rejected' ? 'text-danger' : 'text-warning';
+            const outputLines = result.actual_output ? result.actual_output.join('\n') : '';
+            const expectedLines = result.expected_output ? result.expected_output.join('\n') : '';
+            const errorPre = result.error_message ? `<pre class="text-danger small">${result.error_message}</pre>` : '';
+            
+            tableHtml += `
+                <tr>
+                    <td><pre>${result.input}</pre></td>
+                    <td><pre>${expectedLines}</pre></td>
+                    <td><pre>${outputLines}</pre></td>
+                    <td class="${statusClass}">
+                        ${result.status}
+                        ${errorPre}
+                    </td>
+                </tr>
+            `;
+        });
+        
+        tableHtml += `</tbody></table>`;
+        resultsContainer.innerHTML = tableHtml;
 
-</div>
-{% endblock %}
+        // Display final success message
+        submitStatus.classList.remove('d-none', 'text-warning', 'text-success', 'text-danger');
+        if (isAllAccepted) {
+            submitStatus.textContent = '✅ All Test Cases Accepted! Submission saved.';
+            submitStatus.classList.add('text-success');
+        } else {
+            submitStatus.textContent = '⚠️ Submission saved, but tests failed.';
+            submitStatus.classList.add('text-warning');
+        }
+    }
 
-{% block extra_js %}
-<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 
-<script>
-    // This is the existing CodeMirror setup from your file
-    const languageModes = {
-        "python": "python", "c": "text/x-csrc", "cpp": "text/x-c++src",
-        "java": "text/x-java", "javascript": "javascript"
-    };
-
-    const textarea = document.getElementById("code-editor");
-    const languageSelect = document.getElementById("language-select");
-
-    const editor = CodeMirror.fromTextArea(textarea, {
-        mode: languageModes[languageSelect.value] || "python",
-        lineNumbers: true,
-        theme: "dracula",
-        indentUnit: 4,
-        matchBrackets: true,
-        autoCloseBrackets: true,
-        extraKeys: { "Ctrl-Space": "autocomplete" }
+    // --- 1. Submission Handler (Prevents Reload) ---
+    submissionForm.addEventListener('submit', function(e) {
+        e.preventDefault(); // <-- THE KEY FIX: STOP THE RELOAD
+        
+        // 1. Get latest code and language
+        textarea.value = editor.getValue();
+        const code = textarea.value;
+        const language = languageSelect.value;
+        
+        // 2. UI Lock and Status Update
+        submitBtn.disabled = true;
+        submitStatus.classList.remove('d-none');
+        submitStatus.classList.remove('text-success', 'text-warning', 'text-danger');
+        submitStatus.textContent = '⏳ Submitting and running tests...';
+        
+        // 3. Send AJAX Request to API (which saves the submission)
+        fetch(API_SUBMIT_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({ code: code, language: language })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                renderResults(data.results);
+            } else {
+                // API execution failed or returned server error
+                submitStatus.textContent = `❌ Submission Error: ${data.error}`;
+                submitStatus.classList.add('text-danger');
+                resultsContainer.innerHTML = ''; // Clear old results
+                resultsTitle.classList.add('d-none');
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            submitStatus.textContent = '⚠️ Network Error: Failed to reach the server.';
+            submitStatus.classList.add('text-danger');
+        })
+        .finally(() => {
+            submitBtn.disabled = false;
+        });
     });
 
-    // --- Vue Application ---
-    const { createApp } = Vue;
 
-    createApp({
-        delimiters: ['${', '}'], // To avoid conflict with Django
-        data() {
-            return {
-                code: `{{ code|escapejs }}`,
-                selectedLanguage: '{{ selected_language }}',
-                isLoading: false,
-                results: null,
-                errorOutput: null,
-                questionId: {{ question.id }}
-            }
-        },
-        mounted() {
-            editor.setValue(this.code);
-            editor.on("change", (instance) => {
-                this.code = instance.getValue();
-            });
-            languageSelect.addEventListener("change", () => {
-                this.selectedLanguage = languageSelect.value;
-            });
-        },
-        methods: {
-            submitCode() {
-                this.isLoading = true;
-                this.results = null;
-                this.errorOutput = null;
-
-                const apiUrl = `/api/execute/${this.questionId}/`;
-                const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
-
-                axios.post(apiUrl, {
-                    code: this.code,
-                    language: this.selectedLanguage,
-                }, {
-                    headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' }
-                })
-                .then(response => {
-                    if (response.data.success) {
-                        this.results = response.data.results;
-                        this.errorOutput = response.data.error_output;
-                    } else {
-                        this.errorOutput = response.data.error || "An unknown error occurred.";
-                    }
-                })
-                .catch(error => {
-                    console.error("An error occurred:", error);
-                    this.errorOutput = "An API error occurred. Please check the console.";
-                })
-                .finally(() => {
-                    this.isLoading = false;
-                });
-            }
-        },
-        watch: {
-            selectedLanguage(newLang) {
-                editor.setOption("mode", languageModes[newLang]);
-            }
-        }
-    }).mount('#vue-app');
-
-    // This is the existing "Run Code" logic from your file - no changes needed here.
+    // --- 2. Custom Input Handler (Run Code) ---
     const runBtn = document.getElementById("run-custom-btn");
     const outputBox = document.getElementById("custom-output");
     const customInputBox = document.getElementById("custom-input");
@@ -173,10 +207,11 @@
         const custom_input = customInputBox.value;
 
         outputBox.textContent = "⏳ Running...";
+        runBtn.disabled = true; // Disable button during run
 
-        fetch("{% url 'run_code' %}", {
+        fetch(API_RUN_URL, {
             method: "POST",
-            headers: { "Content-Type": "application/json", "X-CSRFToken": "{{ csrf_token }}" },
+            headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
             body: JSON.stringify({ code: code, language: language, stdin: custom_input })
         })
         .then(res => res.json())
@@ -190,9 +225,18 @@
         .catch(err => {
             outputBox.textContent = "⚠️ Failed to execute code.";
             console.error(err);
+        })
+        .finally(() => {
+            runBtn.disabled = false;
         });
     });
 
+    // --- Initial Load Logic (Render previous results if available) ---
+    const initialResults = JSON.parse(textarea.dataset.initialResults || 'null');
+    if (initialResults) {
+        renderResults(initialResults);
+    }
+    
 </script>
 {% endblock %}
 
@@ -200,7 +244,8 @@
 <style>
     .CodeMirror {
         height: 400px;
-        border: 1px solid #ddd;
+        /* Use SCSS variable fallback for consistency */
+        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1)); 
     }
 </style>
 {% endblock %}

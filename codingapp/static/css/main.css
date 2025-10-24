@@ -12001,4 +12001,84 @@ body {
   border-left: 3px solid #00f0ff !important;
   color: #fff !important;
   text-shadow: 0 0 5px rgba(0, 240, 255, 0.7);
+}
+
+.main-content-card {
+  background-image: linear-gradient(180deg, rgb(16.6833333333, 21.8166666667, 29.5166666667) 0%, #0d1117 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+  border-radius: 0.8rem;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+  padding: 2rem;
+  margin-bottom: 2rem;
+}
+.main-content-card input, .main-content-card textarea, .main-content-card select {
+  background-color: rgb(25.8916666667, 33.8583333333, 45.8083333333) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #e2e8f0 !important;
+}
+.main-content-card input:focus, .main-content-card textarea:focus, .main-content-card select:focus {
+  border-color: #00f0ff !important;
+  box-shadow: 0 0 5px rgba(0, 240, 255, 0.5) !important;
+}
+
+.floating-nav-wrapper {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  padding: 0.5rem;
+  background-color: rgba(13, 17, 23, 0.7);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  border-radius: 50px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.floating-nav-list {
+  display: flex;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  align-items: center;
+}
+
+.floating-nav-list .nav-item {
+  position: relative;
+  z-index: 2;
+}
+
+.floating-nav-list .nav-link {
+  display: block;
+  padding: 0.5rem 1.25rem;
+  border-radius: 50px;
+  color: #a0aec0;
+  transition: color 0.3s;
+  font-weight: bold;
+  text-decoration: none;
+}
+
+.floating-nav-list .nav-link:hover {
+  color: #00f0ff;
+}
+
+/* The Moving Indicator (The "Lamp") */
+#nav-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background-color: rgba(0, 240, 255, 0.1);
+  border-radius: 50px;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Style for the active link text, since the indicator handles the background */
+.floating-nav-list .nav-link.active {
+  color: #00f0ff;
 }/*# sourceMappingURL=main.css.map */

@@ -157,7 +157,13 @@ class AssessmentSession(models.Model):
 # ---- UserProfile model ----
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
-    profile_picture = models.ImageField(upload_to='profiles/', blank=True, null=True)
+    profile_picture = models.ImageField(
+        upload_to='profiles/', 
+        blank=True, 
+        null=True,
+        # Set the path to your default image inside the static directory
+        default='profiles/default_profile.png' 
+    )
     full_name = models.CharField(max_length=100, blank=True)
 
     def __str__(self):
