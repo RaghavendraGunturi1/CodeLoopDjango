@@ -1,0 +1,68 @@
+// main.scss
+
+// Sass built-in module
+@use "sass:color";
+
+// 1. Override Bootstrap's Core Variables for our "Cyber Core" theme
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap');
+
+// -- Color Palette --
+$primary:       #00f0ff;  // Bright Cyan
+$secondary:     #8A2BE2;  // Electric Violet
+$light:         #1a202c;  // Dark Gray for component backgrounds
+$dark:          #0d1117;  // Deep Space Black for main background
+$success:       #00ff7f;  // Neon Green
+$danger:        #ff2d55;  // Neon Pink/Red
+$info:          $primary;
+$body-bg:       $dark;
+$body-color:    #a0aec0;  // Light gray for general text
+$headings-color:#e2e8f0;  // Lighter gray for headings
+
+// -- Links --
+$link-color: $primary;
+$link-hover-color: color.adjust($primary, $lightness: 15%);
+
+// -- Components --
+$border-radius: .4rem;
+$border-color:  rgba(255, 255, 255, 0.1);
+
+// Table Overrides
+$table-color:               $body-color;
+$table-border-color:        $border-color;
+$table-hover-color:         $headings-color;
+$table-striped-color:       $headings-color;
+$table-striped-bg-opacity:  0.03;
+
+$list-group-bg: transparent;
+$list-group-border-color: $border-color;
+
+// -- Fonts --
+$font-family-sans-serif: 'Roboto Mono', monospace;
+$headings-font-family:   'Roboto Mono', monospace;
+
+
+// 2. Import the original Bootstrap Sass files
+@import "../../../node_modules/bootstrap/scss/bootstrap";
+
+
+// 3. Add Custom Styles and Futuristic Polish
+body {
+    backdrop-filter: blur(5px);
+}
+
+.btn-primary {
+    box-shadow: 0 0 10px rgba($primary, 0.5);
+    transition: all 0.3s ease;
+    &:hover {
+        box-shadow: 0 0 20px rgba($primary, 0.8);
+        transform: translateY(-2px);
+    }
+}
+
+.sidebar-nav .nav-link.active,
+.sidebar-nav .nav-link:hover {
+    background: linear-gradient(90deg, rgba($primary, 0.2), rgba($primary, 0.05)) !important;
+    border-left: 3px solid $primary !important;
+    color: #fff !important;
+    text-shadow: 0 0 5px rgba($primary, 0.7);
+}
