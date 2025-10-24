@@ -4,15 +4,6 @@ from .models import Module, Question
 import json
 
 
-class ModuleForm(forms.ModelForm):
-    class Meta:
-        model = Module
-        fields = ["title", "description"]
-        widgets = {
-            "title": forms.TextInput(attrs={"class": "form-control"}),
-            "description": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
-        }
-
 from django.forms import formset_factory
 
 class TestCaseForm(forms.Form):
