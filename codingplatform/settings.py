@@ -7,7 +7,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv() # And this
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-default-secret-key')
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
-#JUDGE0_API_KEY = "9fbd908224mshda77b4f2563d12dp1997cajsn15b3945af3d7"
 JUDGE0_API_KEY = os.environ.get('JUDGE0_API_KEY')
 #DEBUG = True
 #PISTON_API_URL = "https://emkc.org/api/v2/piston/execute"
