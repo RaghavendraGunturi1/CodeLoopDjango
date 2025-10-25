@@ -296,7 +296,17 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.auth.models import User
 
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.contrib.auth.models import User
+
 @receiver(post_save, sender=User)
 def create_profile(sender, instance, created, **kwargs):
     if created:
-        UserProfile.objects.get_or_create(user=instance)
+        profile, created_flag = UserProfile.objects.get_or_create(user=instance)
+        
+        # FIX: Explicitly set the default filename if the profile was just created
+        if created_flag:
+            # We set the name of the file expected to be in the /media/profiles/ directory.
+            profile.profile_picture = 'default_profile.png' 
+            profile.save()

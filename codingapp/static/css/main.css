@@ -12081,4 +12081,40 @@ body {
 /* Style for the active link text, since the indicator handles the background */
 .floating-nav-list .nav-link.active {
   color: #00f0ff;
+}
+
+#spline-full-screen-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw; /* Keep it full screen */
+  height: 100vh;
+  overflow: hidden;
+  z-index: 100;
+  pointer-events: auto; /* FIX: MUST BE AUTO FOR INTERACTION */
+}
+
+#spline-crop-container {
+  position: absolute;
+  top: -3vh;
+  left: -3vw;
+  width: 106vw;
+  height: 106vh;
+  /* FIX: Shift the visible part of the 3D scene to the right */
+  transform: scale(1.05) translateX(20vw); /* <-- ADD TRANSLATEX to shift right */
+}
+#spline-crop-container iframe {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  /* Ensure the iframe itself doesn't block the background */
+  background-color: transparent;
+}
+
+/* Ensure content and background boxes are stacked correctly */
+.main-content {
+  position: relative;
+  z-index: 900 !important; /* Must be above the 3D scene (z-index 100) */
 }/*# sourceMappingURL=main.css.map */

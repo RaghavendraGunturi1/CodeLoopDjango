@@ -139,8 +139,14 @@ def execute_code(code, language, test_cases):
             break
 
     return results, error_output
+
 def home(request):
-    return redirect('dashboard') if request.user.is_authenticated else redirect('login')
+    # If the user is authenticated, redirect them to the dashboard.
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+    
+    # If not authenticated, render the new welcome page.
+    return render(request, 'codingapp/welcome.html') # <--- NEW TARGET TEMPLATE
 
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404

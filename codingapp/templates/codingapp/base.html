@@ -12,7 +12,10 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css" rel="stylesheet">
     
+    {% block welcome_styles %}{% endblock %} 
+
     <style>
+        /* Existing base styles for non-welcome pages (will be overridden on welcome.html) */
         body {
             /* Adjust padding-top for the new fixed floating navbar */
             padding-top: 90px; 
@@ -75,6 +78,8 @@
     <div id="boxes-background">
         <div class="grid-container"></div>
     </div>
+    
+    {% block spline_embed %}{% endblock %}
 
     <div class="floating-nav-wrapper">
         <ul class="floating-nav-list" id="floating-nav">
@@ -133,6 +138,7 @@
             {% endif %}
         </ul>
     </div>
+    
     <div class="main-content container-fluid">
         {% block content %}{% endblock %}
     </div>

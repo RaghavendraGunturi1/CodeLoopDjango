@@ -1,0 +1,90 @@
+{% extends 'codingapp/base.html' %}
+{% load static %}
+
+{% block title %}Welcome to CodeLoop{% endblock %}
+
+{% block welcome_styles %}
+<style>
+    /* --- CSS OVERRIDES APPLIED ONLY TO THE WELCOME PAGE --- */
+    
+    /* 1. Reset Body & Background Boxes to enable full-screen transparency */
+    body {
+        padding-top: 0 !important;
+        background-color: transparent !important; 
+    }
+    #boxes-background {
+        display: none !important; 
+    }
+    
+    /* 2. Reset main-content area to stretch to the viewport size */
+    .main-content {
+        padding: 0 !important;
+        position: absolute !important; 
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 900; /* Ensure content is clickable */
+    }
+    
+    /* 3. Ensure the Floating Navbar is visible over the 3D element */
+    .floating-nav-wrapper {
+        z-index: 1001 !important; 
+    }
+    /* 4. Fix for Mouse Interactivity (must be auto on the containing div for the iframe to capture input) */
+    .spline-embed-box {
+        pointer-events: auto;
+    }
+</style>
+{% endblock %}
+
+
+{% block spline_embed %}
+<div id="spline-full-screen-container">
+    <div id="spline-crop-container">
+        <iframe 
+            src="https://my.spline.design/greetingrobot-oiPeaMEv1nP3799fhL24KLuv/" 
+            frameborder="0" 
+            width="100%" 
+            height="100%" 
+            id="spline-iframe"
+            allowfullscreen
+            style="border: none; background-color: transparent;"
+        ></iframe>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block content %}
+<div class="container-fluid d-flex p-0" style="min-height: 100vh;">
+    
+    <div class="col-md-5 d-flex flex-column justify-content-center p-5 position-relative bg-light rounded-end shadow-lg" style="pointer-events: auto;">
+        
+        <h1 class="display-3 fw-bold mb-3" 
+            style="
+                background-image: linear-gradient(to right, var(--primary), #ffffff);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                text-shadow: 0 0 0px rgba(9, 210, 9, 0.7);
+            ">
+            CODELOOP
+        </h1>
+        
+        <p class="lead text-secondary max-w-lg mb-5">
+            A modern platform for interactive coding challenges and assessments, featuring an engaging 3D environment.
+        </p>
+
+        {% if not user.is_authenticated %}
+        <div>
+            <a href="{% url 'register' %}" class="btn btn-primary btn-lg me-3">Get Started</a>
+            <a href="{% url 'login' %}" class="btn btn-primary btn-lg me-3">Login</a>
+        </div>
+        {% endif %}
+        
+    </div>
+
+    <div class="col-md-7 d-flex align-items-center justify-content-center" style="min-height: 500px;">
+        </div>
+</div>
+{% endblock %}
