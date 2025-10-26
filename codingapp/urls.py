@@ -14,7 +14,7 @@ urlpatterns = [
     path('questions/<int:pk>/', views.question_detail, name='question_detail'),
     path('leaderboard/', views.leaderboard, name='leaderboard'),
     path('api/execute/<int:question_id>/', views.execute_code_api, name='execute_code_api'),
-    
+    path('api/status/<str:task_id>/', views.check_submission_status, name='check_submission_status'),
 
     # Authentication Routes
     path('register/', views.register, name='register'),

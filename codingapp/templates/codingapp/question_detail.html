@@ -29,14 +29,26 @@
         <button type="submit" id="submit-btn" class="btn btn-primary mt-2">
             Submit Code
         </button>
-        <span id="submit-status" class="ms-3 text-warning d-none"></span>
     </form>
 
     <hr class="border-secondary">
     
+    {% if task_id %}
+    <div id="polling-status-message" class="alert alert-info" role="alert">
+        <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+        Submission received. Status: PENDING (Running tests in background...)
+    </div>
+    {% endif %}
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} mt-2">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
     <h4 id="results-title" class="mt-4 text-primary d-none">Test Case Results:</h4>
     <div id="results-container" class="table-responsive">
-        </div>
+    </div>
     
     <h4 class="mt-4 text-primary">Try with Custom Input</h4>
     <div>
@@ -49,203 +61,175 @@
         <pre id="custom-output" class="bg-dark border border-secondary p-3 mt-3" style="white-space: pre-wrap;">Output will appear here.</pre>
     </div>
 </div>
+
+{{ results|json_script:"initial-results-data" }}
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    // --- Configuration ---
-    const languageModes = {
-        "python": "python", "c": "text/x-csrc", "cpp": "text/x-c++src",
-        "java": "text/x-java", "javascript": "javascript"
-    };
-    
-    const API_SUBMIT_URL = "{% url 'execute_code_api' question_id=question.id %}";
-    const API_RUN_URL = "{% url 'run_code' %}";
-    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
-    
-    // --- DOM Elements ---
-    const submissionForm = document.getElementById('submission-form');
-    const submitBtn = document.getElementById('submit-btn');
-    const submitStatus = document.getElementById('submit-status');
-    const languageSelect = document.getElementById("language-select");
-    const textarea = document.getElementById("code-editor");
-    const resultsTitle = document.getElementById('results-title');
-    const resultsContainer = document.getElementById('results-container');
-    
-    // --- CodeMirror Setup ---
-    const editor = CodeMirror.fromTextArea(textarea, {
-        mode: languageModes[languageSelect.value] || "python",
-        lineNumbers: true,
-        theme: "dracula",
-        indentUnit: 4,
-        matchBrackets: true,
-        autoCloseBrackets: true,
-        extraKeys: { "Ctrl-Space": "autocomplete" },
-        readOnly: false 
-    });
-    editor.setValue(textarea.value);
+    document.addEventListener("DOMContentLoaded", function() {
+        // --- Configuration ---
+        const languageModes = {
+            "python": "python", "c": "text/x-csrc", "cpp": "text/x-c++src",
+            "java": "text/x-java", "javascript": "javascript"
+        };
+        
+        const API_RUN_URL = "{% url 'run_code' %}";
+        const API_STATUS_URL = "{% url 'check_submission_status' task_id='DUMMY_TASK_ID' %}";
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        
+        // --- DOM Elements ---
+        const submissionForm = document.getElementById('submission-form');
+        const submitBtn = document.getElementById('submit-btn');
+        const languageSelect = document.getElementById("language-select");
+        const textarea = document.getElementById("code-editor");
+        const resultsTitle = document.getElementById('results-title');
+        const resultsContainer = document.getElementById('results-container');
+        const pollingMessageContainer = document.getElementById('polling-status-message');
 
-    // Sync language selection with CodeMirror
-    languageSelect.addEventListener("change", () => {
-        editor.setOption("mode", languageModes[languageSelect.value]);
-    });
-    
-    // --- Helper Function to Render Results ---
-    function renderResults(results) {
-        if (!results || results.length === 0) {
-            resultsTitle.classList.add('d-none');
-            resultsContainer.innerHTML = '';
-            return;
-        }
+        const initialTaskId = "{{ task_id }}";
+
+        // --- CodeMirror Setup ---
+        const editor = CodeMirror.fromTextArea(textarea, {
+            mode: languageModes[languageSelect.value] || "python",
+            lineNumbers: true,
+            theme: "dracula",
+            indentUnit: 4,
+            matchBrackets: true,
+            autoCloseBrackets: true,
+            readOnly: false 
+        });
+        editor.setValue(textarea.value);
+
+        languageSelect.addEventListener("change", () => {
+            editor.setOption("mode", languageModes[languageSelect.value]);
+        });
         
-        resultsTitle.classList.remove('d-none');
-        
-        const isAllAccepted = results.every(r => r.status === 'Accepted');
-        let tableHtml = `
-            <table class="table table-bordered table-dark">
-                <thead class="thead-dark">
-                    <tr>
-                        <th>Input</th>
-                        <th>Expected Output</th>
-                        <th>Your Output</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
-        
-        results.forEach(result => {
-            const statusClass = result.status === 'Accepted' ? 'text-success' : 
-                                result.status === 'Rejected' ? 'text-danger' : 'text-warning';
-            const outputLines = result.actual_output ? result.actual_output.join('\n') : '';
-            const expectedLines = result.expected_output ? result.expected_output.join('\n') : '';
-            const errorPre = result.error_message ? `<pre class="text-danger small">${result.error_message}</pre>` : '';
+        // --- Helper Function to Render Results ---
+        function renderResults(results) {
+            if (!results || results.length === 0) {
+                resultsTitle.classList.add('d-none');
+                resultsContainer.innerHTML = '';
+                return;
+            }
+
+            // ⭐ FIX: Calculate accepted count and update title
+            const acceptedCount = results.filter(r => r.status === 'Accepted').length;
+            const totalCount = results.length;
             
-            tableHtml += `
-                <tr>
-                    <td><pre>${result.input}</pre></td>
-                    <td><pre>${expectedLines}</pre></td>
-                    <td><pre>${outputLines}</pre></td>
-                    <td class="${statusClass}">
-                        ${result.status}
-                        ${errorPre}
-                    </td>
-                </tr>
+            resultsTitle.textContent = `Test Case Results: ${acceptedCount} / ${totalCount} Passed`;
+            resultsTitle.classList.remove('d-none');
+            
+            let tableHtml = `<table class="table table-bordered table-dark"><thead><tr><th>Input</th><th>Expected Output</th><th>Your Output</th><th>Status</th></tr></thead><tbody>`;
+            results.forEach(result => {
+                const statusClass = result.status === 'Accepted' ? 'text-success' : 'text-danger';
+                const outputLines = result.actual_output ? result.actual_output.join('\n') : '';
+                const expectedLines = result.expected_output ? result.expected_output.join('\n') : '';
+                const errorPre = result.error_message ? `<pre class="text-danger small">${result.error_message}</pre>` : '';
+                tableHtml += `<tr><td><pre>${result.input}</pre></td><td><pre>${expectedLines}</pre></td><td><pre>${outputLines}</pre></td><td class="${statusClass}">${result.status}${errorPre}</td></tr>`;
+            });
+            tableHtml += `</tbody></table>`;
+            resultsContainer.innerHTML = tableHtml;
+        }
+
+        // --- 1. Submission Handler (Prevents multiple clicks) ---
+        submissionForm.addEventListener('submit', function(e) {
+            editor.save();
+            if (!editor.getValue().trim()) {
+                e.preventDefault(); 
+                alert("Code cannot be empty!");
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = `
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                Submitting...
             `;
         });
-        
-        tableHtml += `</tbody></table>`;
-        resultsContainer.innerHTML = tableHtml;
 
-        // Display final success message
-        submitStatus.classList.remove('d-none', 'text-warning', 'text-success', 'text-danger');
-        if (isAllAccepted) {
-            submitStatus.textContent = '✅ All Test Cases Accepted! Submission saved.';
-            submitStatus.classList.add('text-success');
-        } else {
-            submitStatus.textContent = '⚠️ Submission saved, but tests failed.';
-            submitStatus.classList.add('text-warning');
+        // --- 2. Custom Input Handler ---
+        // (This section remains unchanged)
+        const runBtn = document.getElementById("run-custom-btn");
+        const outputBox = document.getElementById("custom-output");
+        const customInputBox = document.getElementById("custom-input");
+
+        runBtn.addEventListener("click", () => {
+            const code = editor.getValue();
+            const language = languageSelect.value;
+            const custom_input = customInputBox.value;
+
+            outputBox.textContent = "⏳ Running...";
+            runBtn.disabled = true;
+
+            fetch(API_RUN_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
+                body: JSON.stringify({ code: code, language: language, stdin: custom_input })
+            })
+            .then(res => res.json())
+            .then(data => {
+                outputBox.textContent = data.error ? `❌ Error:\n${data.error}` : `✅ Output:\n${data.output}`;
+            })
+            .catch(err => {
+                outputBox.textContent = "⚠️ Failed to execute code.";
+                console.error(err);
+            })
+            .finally(() => {
+                runBtn.disabled = false;
+            });
+        });
+
+        // --- 3. ASYNCHRONOUS POLLING LOGIC ---
+        if (initialTaskId && initialTaskId !== 'None') {
+            // ⭐ FIX: If a task is running on page load, disable the submit button
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = `
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                Processing...
+            `;
+
+            const pollInterval = 2000;
+            const url = API_STATUS_URL.replace('DUMMY_TASK_ID', initialTaskId);
+            
+            const intervalId = setInterval(function() {
+                fetch(url)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (pollingMessageContainer) {
+                             pollingMessageContainer.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> Submission processing... Status: ${data.status}`;
+                        }
+                        if (data.ready) {
+                            clearInterval(intervalId);
+                            window.location.reload(); 
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Polling error:', error);
+                        clearInterval(intervalId);
+                        if (pollingMessageContainer) {
+                             pollingMessageContainer.textContent = 'Error checking status.';
+                             submitBtn.disabled = false;
+                             submitBtn.textContent = 'Submit Code';
+                        }
+                    });
+            }, pollInterval);
         }
-    }
-
-
-    // --- 1. Submission Handler (Prevents Reload) ---
-    submissionForm.addEventListener('submit', function(e) {
-        e.preventDefault(); // <-- THE KEY FIX: STOP THE RELOAD
         
-        // 1. Get latest code and language
-        textarea.value = editor.getValue();
-        const code = textarea.value;
-        const language = languageSelect.value;
-        
-        // 2. UI Lock and Status Update
-        submitBtn.disabled = true;
-        submitStatus.classList.remove('d-none');
-        submitStatus.classList.remove('text-success', 'text-warning', 'text-danger');
-        submitStatus.textContent = '⏳ Submitting and running tests...';
-        
-        // 3. Send AJAX Request to API (which saves the submission)
-        fetch(API_SUBMIT_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': csrfToken
-            },
-            body: JSON.stringify({ code: code, language: language })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                renderResults(data.results);
-            } else {
-                // API execution failed or returned server error
-                submitStatus.textContent = `❌ Submission Error: ${data.error}`;
-                submitStatus.classList.add('text-danger');
-                resultsContainer.innerHTML = ''; // Clear old results
-                resultsTitle.classList.add('d-none');
+        // --- 4. Initial Load Logic ---
+        // ⭐ FIX: Safely parse JSON data from the json_script tag
+        const resultsDataElem = document.getElementById('initial-results-data');
+        if (resultsDataElem) {
+            try {
+                const initialResults = JSON.parse(resultsDataElem.textContent);
+                if (initialResults) {
+                    renderResults(initialResults);
+                }
+            } catch (e) {
+                console.error("Could not parse initial results JSON.", e);
             }
-        })
-        .catch(err => {
-            console.error(err);
-            submitStatus.textContent = '⚠️ Network Error: Failed to reach the server.';
-            submitStatus.classList.add('text-danger');
-        })
-        .finally(() => {
-            submitBtn.disabled = false;
-        });
+        }
     });
-
-
-    // --- 2. Custom Input Handler (Run Code) ---
-    const runBtn = document.getElementById("run-custom-btn");
-    const outputBox = document.getElementById("custom-output");
-    const customInputBox = document.getElementById("custom-input");
-
-    runBtn.addEventListener("click", () => {
-        const code = editor.getValue();
-        const language = languageSelect.value;
-        const custom_input = customInputBox.value;
-
-        outputBox.textContent = "⏳ Running...";
-        runBtn.disabled = true; // Disable button during run
-
-        fetch(API_RUN_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
-            body: JSON.stringify({ code: code, language: language, stdin: custom_input })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.error) {
-                outputBox.textContent = `❌ Error:\n${data.error}`;
-            } else {
-                outputBox.textContent = `✅ Output:\n${data.output}`;
-            }
-        })
-        .catch(err => {
-            outputBox.textContent = "⚠️ Failed to execute code.";
-            console.error(err);
-        })
-        .finally(() => {
-            runBtn.disabled = false;
-        });
-    });
-
-    // --- Initial Load Logic (Render previous results if available) ---
-    const initialResults = JSON.parse(textarea.dataset.initialResults || 'null');
-    if (initialResults) {
-        renderResults(initialResults);
-    }
-    
 </script>
-{% endblock %}
-
-{% block extra_css %}
-<style>
-    .CodeMirror {
-        height: 400px;
-        /* Use SCSS variable fallback for consistency */
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1)); 
-    }
-</style>
 {% endblock %}

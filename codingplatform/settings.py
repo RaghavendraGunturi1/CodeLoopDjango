@@ -12,6 +12,7 @@ JUDGE0_API_KEY = os.environ.get('JUDGE0_API_KEY')
 #PISTON_API_URL = "https://emkc.org/api/v2/piston/execute"
 #PISTON_API_URL = "http://localhost:2000/api/v2/execute"
 PISTON_API_URL = os.environ.get('PISTON_API_URL', 'https://emkc.org/api/v2/piston/execute')
+SUPPORTED_LANGUAGES = ["python", "c", "cpp", "java", "javascript"]
 
 
 #ALLOWED_HOSTS = ['localhost', '127.0.0.1','192.168.72.169']
@@ -130,3 +131,16 @@ LOGGING = {
         'level': 'INFO',
     },
 }
+
+# ----------------
+# CELERY CONFIGURATION
+# ----------------
+
+# Assuming you're running Redis locally or have it configured via environment variables
+CELERY_BROKER_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0')
+CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TASK_TIME_LIMIT = 300 # Max task execution time (5 minutes)
+CELERY_TASK_SOFT_TIME_LIMIT = 240 # Soft time limit (4 minutes)

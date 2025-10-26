@@ -9,8 +9,15 @@
             <div class="alert alert-{{ message.tags }} mt-3">{{ message }}</div>
         {% endfor %}
     {% endif %}
+    
+    {% if task_id %}
+    <div id="polling-status-message" class="alert alert-info mt-3" role="alert">
+        <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+        Submission received. Status: PENDING (Running tests in background...)
+    </div>
+    {% endif %}
 
-    <form method="POST">
+    <form method="POST" id="assessment-submission-form">
         {% csrf_token %}
         <div class="mb-3">
             <label for="language">Language:</label>
@@ -29,35 +36,20 @@
         {% if not read_only %}
             <button type="submit" class="btn btn-primary">Submit Code</button>
         {% else %}
-            <div class="alert alert-success mt-3">✅ This question is locked because you have solved it or the time is up.</div>
+            <div class="alert alert-success mt-3">✅ This question is locked.</div>
         {% endif %}
     </form>
+    
     {% if results %}
         <hr>
         <h5>Test Case Results</h5>
-        <div class="list-group">
-            {% for result in results %}
-                <div class="list-group-item">
-                    <div class="d-flex w-100 justify-content-between">
-                        <h6 class="mb-1">Input: <pre class="d-inline">{{ result.input }}</pre></h6>
-                        <span class="badge {% if result.status == 'Accepted' %}bg-success{% else %}bg-danger{% endif %} rounded-pill">{{ result.status }}</span>
-                    </div>
-                    <p class="mb-1"><strong>Expected:</strong> <pre class="d-inline">{% for line in result.expected_output %}{{ line }}{% if not forloop.last %}\n{% endif %}{% endfor %}</pre></p>
-                    <p class="mb-1"><strong>Your Output:</strong> <pre class="d-inline">{% for line in result.actual_output %}{{ line }}{% if not forloop.last %}\n{% endif %}{% endfor %}</pre></p>
-                    {% if result.error_message %}<small class="text-danger">{{ result.error_message }}</small>{% endif %}
-                </div>
-            {% endfor %}
-        </div>
-    {% endif %}
+        {% endif %}
 
 {% endblock %}
 
 {% block assessment_extra_js %}
 <script>
 document.addEventListener("DOMContentLoaded", function() {
-    // Make 'editor' a global variable so the base template can access it.
-    var editor; 
-    
     const codeTextarea = document.getElementById("code");
     const langSelect = document.getElementById("language");
     const readOnlyMode = "{{ read_only|yesno:'true,false' }}" === "true";
@@ -65,57 +57,84 @@ document.addEventListener("DOMContentLoaded", function() {
         python: "python", javascript: "javascript", java: "text/x-java",
         c: "text/x-csrc", cpp: "text/x-c++src"
     };
+
+    const initialTaskId = "{{ task_id }}";
+    const API_STATUS_URL = "{% url 'check_submission_status' task_id='DUMMY_TASK_ID' %}";
+    const pollingMessageContainer = document.getElementById('polling-status-message');
     
-    // Assign to the global 'editor' variable
     editor = CodeMirror.fromTextArea(codeTextarea, {
         lineNumbers: true,
         matchBrackets: true,
-        autoCloseBrackets: true, // This enables auto-completion
+        autoCloseBrackets: true,
         theme: "dracula",
         mode: languageModes[langSelect.value] || "python",
         readOnly: readOnlyMode
     });
 
-    // --- THIS IS THE FIX FOR COPY/PASTE ---
-    // Get the editor's wrapper element and attach event listeners directly
     const editorWrapper = editor.getWrapperElement();
     editorWrapper.addEventListener('cut', (e) => e.preventDefault());
     editorWrapper.addEventListener('copy', (e) => e.preventDefault());
     editorWrapper.addEventListener('paste', (e) => e.preventDefault());
 
-
     if (!readOnlyMode) {
-        langSelect.addEventListener("change", () => editor.setOption("mode", languageModes[this.value]));
+        langSelect.addEventListener("change", () => editor.setOption("mode", languageModes[langSelect.value]));
     }
 
-    const form = document.querySelector("form");
+    const form = document.querySelector("#assessment-submission-form");
     const submitBtn = form.querySelector("button[type='submit']");
     
     form.addEventListener("submit", (e) => {
-        // --- THIS IS THE FIX ---
-        // 1. Prevent the form from submitting immediately.
         e.preventDefault();
-
         editor.save();
         if (!editor.getValue().trim()) {
             alert("Code cannot be empty!");
-            return; // Stop if there's no code
+            return;
         }
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Submitting...`;
+        }
+        setTimeout(() => { form.submit(); }, 100); 
+    });
 
-        // 2. Show the loading state.
+    // ⭐ FIX: Logic to handle button state during polling
+    if (initialTaskId && initialTaskId !== 'None') {
         if (submitBtn) {
             submitBtn.disabled = true;
             submitBtn.innerHTML = `
                 <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                Executing...
+                Processing...
             `;
         }
+
+        const pollInterval = 2000;
+        const url = API_STATUS_URL.replace('DUMMY_TASK_ID', initialTaskId);
         
-        // 3. Give the browser a moment to repaint, then submit the form.
-        setTimeout(() => {
-            form.submit();
-        }, 100); // 100ms delay is enough
-    });
+        const intervalId = setInterval(function() {
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (pollingMessageContainer) {
+                         pollingMessageContainer.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> Submission processing... Status: ${data.status}`;
+                    }
+                    if (data.ready) {
+                        clearInterval(intervalId);
+                        window.location.reload(); 
+                    }
+                })
+                .catch(error => {
+                    console.error('Polling error:', error);
+                    clearInterval(intervalId);
+                    if (pollingMessageContainer) {
+                         pollingMessageContainer.textContent = 'Error checking status.';
+                    }
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Submit Code';
+                    }
+                });
+        }, pollInterval);
+    }
 });
 </script>
 <style>

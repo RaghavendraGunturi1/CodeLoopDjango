@@ -15,18 +15,18 @@
     {% block welcome_styles %}{% endblock %} 
 
     <style>
-        /* Existing base styles for non-welcome pages (will be overridden on welcome.html) */
+        /* Base styles for non-welcome pages */
         body {
-            /* Adjust padding-top for the new fixed floating navbar */
             padding-top: 90px; 
-            /* Use CSS variables defined in main.scss */
             background-color: var(--body-bg, #0d1117); 
             transition: background-color 0.3s ease;
         }
         .main-content {
-            position: relative; z-index: 2; padding: 2rem;
+            position: relative; 
+            z-index: 2; 
+            padding: 2rem;
         }
-        /* Background Boxes Styles (Fixed and Full Screen) */
+        /* Background Boxes Styles */
         #boxes-background {
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
@@ -47,7 +47,6 @@
             position: relative;
             transition: background-color 0s;
         }
-        /* Glowing Card Styles */
         .glow-card::before {
             content: ""; position: absolute; left: 0; top: 0;
             width: 100%; height: 100%; border-radius: inherit;
@@ -56,7 +55,6 @@
             -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
             -webkit-mask-composite: xor; mask-composite: exclude;
         }
-        /* We rely on the SCSS for .floating-nav-list .nav-link.active, but this is a CSS variable fallback */
         .floating-nav-list .nav-link.active {
              color: var(--primary, #00f0ff);
         }
@@ -81,6 +79,8 @@
     
     {% block spline_embed %}{% endblock %}
 
+    {% comment %} Conditionally render the main navbar {% endcomment %}
+    {% if not focus_mode %}
     <div class="floating-nav-wrapper">
         <ul class="floating-nav-list" id="floating-nav">
             <div id="nav-indicator"></div>
@@ -100,22 +100,23 @@
                 <li class="nav-item"><a class="nav-link" href="{% url 'assessment_leaderboard_list' %}"><i class="bi bi-trophy me-1"></i> Leaderboards</a></li>
                 
                 {% if user.is_staff %}
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-gear me-1"></i> Manage</a>
-                        <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="navbarDropdown">
-                            <li><a class="dropdown-item" href="{% url 'teacher_module_list' %}">Manage Modules</a></li>
-                            <li><a class="dropdown-item" href="{% url 'teacher_question_list' %}">Manage Questions</a></li>
-                            <li><a class="dropdown-item" href="{% url 'teacher_assessment_list' %}">Manage Assessments</a></li>
-                            <li><a class="dropdown-item" href="{% url 'teacher_group_list' %}">Manage Groups</a></li>
-                            <li><a class="dropdown-item" href="{% url 'manage_courses' %}">Manage Courses</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{% url 'student_performance_list' %}">Student Performance</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{% url 'bulk_user_upload' %}">Bulk User Upload</a></li>
-                            <li><a class="dropdown-item" href="{% url 'bulk_mcq_upload' %}">Bulk MCQ Upload</a></li>
-                        </ul>
-                    </li>
-                {% endif %}
+    <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-gear me-1"></i> Manage</a>
+        <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="navbarDropdown">
+            <li><a class="dropdown-item" href="{% url 'teacher_module_list' %}">Manage Modules</a></li>
+            <li><a class="dropdown-item" href="{% url 'teacher_question_list' %}">Manage Questions</a></li>
+            <li><a class="dropdown-item" href="{% url 'teacher_assessment_list' %}">Manage Assessments</a></li>
+            <li><a class="dropdown-item" href="{% url 'teacher_group_list' %}">Manage Groups</a></li>
+            <li><a class="dropdown-item" href="{% url 'manage_courses' %}">Manage Courses</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="{% url 'student_performance_list' %}">Student Performance</a></li>
+            <li><a class="dropdown-item text-danger" href="{% url 'reset_submissions_admin' %}">Reset Submissions</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="{% url 'bulk_user_upload' %}">Bulk User Upload</a></li>
+            <li><a class="dropdown-item" href="{% url 'bulk_mcq_upload' %}">Bulk MCQ Upload</a></li>
+        </ul>
+    </li>
+{% endif %}
                 
                 <li class="nav-item dropdown ms-3">
                     <a class="nav-link dropdown-toggle" href="#" id="profileDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-person-circle me-1"></i> {{ user.username }}</a>
@@ -138,6 +139,7 @@
             {% endif %}
         </ul>
     </div>
+    {% endif %}
     
     <div class="main-content container-fluid">
         {% block content %}{% endblock %}
@@ -153,14 +155,12 @@
 
             // --- Floating Lamp Navbar Script ---
             const navList = document.getElementById('floating-nav');
-            const indicator = document.getElementById('nav-indicator');
-            // Select only the direct <a> links that have a simple navigation role
-            const navLinks = navList.querySelectorAll('.nav-link:not([data-bs-toggle="dropdown"])');
-
-            // Django URL paths (cleaned) for comparison
-            const dashboardPath = cleanPath('{% url "dashboard" %}');
-            const homePath = cleanPath('{% url "home" %}');
-            
+            if (navList) { // Only run if the main navbar exists
+                const indicator = document.getElementById('nav-indicator');
+                const navLinks = navList.querySelectorAll('.nav-link:not([data-bs-toggle="dropdown"])');
+                const dashboardPath = '{% url "dashboard" %}';
+                const homePath = '{% url "home" %}';
+            }
             function moveIndicator(target) {
                 if (!target) return;
 

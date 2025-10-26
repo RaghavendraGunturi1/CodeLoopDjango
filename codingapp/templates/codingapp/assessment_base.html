@@ -2,19 +2,37 @@
 
 {% block extra_css %}
 <style>
-    /* Distraction-free mode styles */
-    .sidebar-nav { display: none !important; }
-    .main-content { margin-left: 0 !important; padding: 1rem !important; height: 100vh; overflow-y: auto; }
-    body { overflow: hidden; }
+    /* Focus mode styles */
+    body {
+        /* Remove padding from the main navbar which is now hidden */
+        padding-top: 0 !important;
+        /* Prevent the whole page from scrolling, as we'll control scrolling inside */
+        overflow: hidden;
+    }
+    .main-content {
+        /* Remove default padding to make the assessment container flush to the edges */
+        padding: 0 !important;
+        height: 100vh; /* Make the main container take up the full viewport height */
+    }
+    #assessment-container {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+    .assessment-content-card {
+        flex-grow: 1; /* Allow this card to fill all available vertical space */
+        overflow-y: auto; /* Make ONLY this card scrollable */
+        margin-bottom: 0 !important; /* Remove any bottom margin that might push content down */
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<div id="assessment-container" class="container-fluid">
+<div id="assessment-container" class="container-fluid p-3">
 
-    <div class="card p-3 mb-3 sticky-top">
+    <div class="card p-3 mb-3">
         <div class="d-flex justify-content-between align-items-center">
-            <h4 class="mb-0">{{ assessment.title }}</h4>
+            <h4 class="mb-0 text-primary">{{ assessment.title }}</h4>
             <div class="d-flex align-items-center">
                 <strong class="me-3 text-warning">Warnings: <span id="warning-count">0</span> / 3</strong>
                 <strong class="me-3">Time Left: <span id="assessment-timer" class="text-danger fw-bold h5"></span></strong>
@@ -24,8 +42,14 @@
         <hr class="my-2">
         <div id="question-nav-bar" class="d-flex flex-wrap gap-2">
             {% for q_item in all_questions %}
-                <a href="{% url 'submit_assessment_code' assessment.id q_item.question.id %}" class="btn btn-sm {% if q_item.is_solved %}btn-success{% elif q_item.is_attempted %}btn-warning{% else %}btn-outline-secondary{% endif %}" title="{{ q_item.question.title }}">
-                   {{ forloop.counter }}
+                <a href="{% url 'submit_assessment_code' assessment.id q_item.question.id %}" 
+                   class="btn btn-sm 
+                          {% if q_item.is_solved %}btn-success
+                          {% elif q_item.is_attempted %}btn-warning
+                          {% else %}btn-outline-secondary{% endif %}
+                          {% if q_item.question.id == question.id %}active{% endif %}" 
+                   title="{{ q_item.question.title }}">
+                    {{ forloop.counter }}
                 </a>
             {% empty %}
                 <span class="text-muted">No coding questions in this assessment.</span>
@@ -33,7 +57,7 @@
         </div>
     </div>
 
-    <div class="card p-4">
+    <div class="card p-4 assessment-content-card">
         {% block assessment_content %}{% endblock %}
     </div>
 </div>
@@ -50,14 +74,11 @@ document.addEventListener("DOMContentLoaded", function () {
     const timerElement = document.getElementById("assessment-timer");
     const endAssessmentBtn = document.getElementById('end-assessment-btn');
     
-    // Use a unique key for this user & assessment. Using localStorage for persistence across reloads.
     const warningStorageKey = `assessmentWarnings_{{ assessment.id }}_{{ user.id }}`;
 
-    // --- DEFINITIVE RELOAD & TAB-SWITCH FIX ---
     function handleVisibilityChange() {
-        // Check if the page is unloading due to an intentional action.
         if (sessionStorage.getItem('isUnloading')) {
-            return; // Ignore this visibility change event
+            return;
         }
 
         if (document.hidden) {
@@ -69,7 +90,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (currentWarnings > MAX_WARNINGS) {
                 document.removeEventListener('visibilitychange', handleVisibilityChange);
                 alert('You have exceeded the maximum number of tab switches. Your assessment will now be submitted.');
-                clearAssessmentState(); // Clear storage before redirecting
+                clearAssessmentState();
                 window.location.href = `{% url 'assessment_result' assessment.id %}?ended=auto`;
             }
         }
@@ -81,12 +102,11 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
-    // This event fires just before the page unloads for any navigation.
     window.addEventListener('beforeunload', function() {
         sessionStorage.setItem('isUnloading', 'true');
     });
-
-    // When the new page loads, clear the flag.
+    
+    // Clear flag on new page load
     sessionStorage.removeItem('isUnloading');
 
     function clearAssessmentState() {
@@ -96,28 +116,29 @@ document.addEventListener("DOMContentLoaded", function () {
 
     endAssessmentBtn.addEventListener('click', clearAssessmentState);
     
-    // Initialize warning count display on page load
     updateWarningDisplay(parseInt(localStorage.getItem(warningStorageKey) || '0'));
-    
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Timer logic
     const endTime = new Date("{{ end_time|escapejs }}").getTime();
-    const timerInterval = setInterval(() => {
-        const now = new Date().getTime();
-        let timeLeft = Math.floor((endTime - now) / 1000);
-        if (timeLeft <= 0) {
-            clearInterval(timerInterval);
-            clearAssessmentState(); // Clear storage on timeout
-            alert("Time's up!");
-            window.location.href = "{% url 'assessment_result' assessment.id %}";
-            return;
-        }
-        const hours = Math.floor(timeLeft / 3600),
-              minutes = Math.floor((timeLeft % 3600) / 60),
-              seconds = timeLeft % 60;
-        timerElement.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    }, 1000);
+    if (endTime && timerElement) {
+        const timerInterval = setInterval(() => {
+            const now = new Date().getTime();
+            let timeLeft = Math.floor((endTime - now) / 1000);
+            
+            if (timeLeft <= 0) {
+                clearInterval(timerInterval);
+                clearAssessmentState();
+                alert("Time's up! Your assessment will be submitted automatically.");
+                window.location.href = "{% url 'assessment_result' assessment.id %}";
+                return;
+            }
+
+            const hours = Math.floor(timeLeft / 3600);
+            const minutes = Math.floor((timeLeft % 3600) / 60);
+            const seconds = timeLeft % 60;
+            timerElement.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }, 1000);
+    }
 });
 </script>
 {% block assessment_extra_js %}{% endblock %}

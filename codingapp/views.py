@@ -1,5 +1,6 @@
 import requests
 import logging
+import json # <-- ADD json import
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.forms import UserCreationForm
@@ -13,8 +14,9 @@ from django.db.models import Q
 from django.conf import settings
 import csv # <--- NEW IMPORT
 from django.utils.text import slugify # <--- NEW IMPORT
-
-
+from celery.result import AsyncResult # <-- ADD CELERY IMPORT
+from celery.result import AsyncResult 
+from .tasks import process_practice_submission, process_assessment_submission # (and other tasks)
 from .models import (
     Question, Submission, Module,
     Assessment, AssessmentQuestion, AssessmentSubmission,
@@ -51,94 +53,94 @@ import logging
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
 
-def execute_code(code, language, test_cases):
-    """
-    Helper to run code via Piston and collect results, with improved error handling.
-    """
-    results = []
-    error_output = None
+# def execute_code(code, language, test_cases):
+#     """
+#     Helper to run code via Piston and collect results, with improved error handling.
+#     """
+#     results = []
+#     error_output = None
 
-    for test in test_cases or []:
-        payload = {
-            "language": language,
-            "version": "*",
-            "files": [{"name": "solution", "content": code}],
-            "stdin": test.get("input", "")
-        }
+#     for test in test_cases or []:
+#         payload = {
+#             "language": language,
+#             "version": "*",
+#             "files": [{"name": "solution", "content": code}],
+#             "stdin": test.get("input", "")
+#         }
 
-        try:
-            resp = requests.post(PISTON_API_URL, json=payload, timeout=10)
-            resp.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+#         try:
+#             resp = requests.post(PISTON_API_URL, json=payload, timeout=10)
+#             resp.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
 
-            data = resp.json()
-            stdout = data.get("run", {}).get("stdout", "").strip()
-            stderr = data.get("run", {}).get("stderr", "").strip()
+#             data = resp.json()
+#             stdout = data.get("run", {}).get("stdout", "").strip()
+#             stderr = data.get("run", {}).get("stderr", "").strip()
 
-            actual_lines = [line.strip() for line in stdout.splitlines() if line.strip()]
-            expected_lines = test.get("expected_output", [])
+#             actual_lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+#             expected_lines = test.get("expected_output", [])
 
-            if stderr:
-                status = "Error"
-                error_message = stderr
-            elif len(actual_lines) != len(expected_lines):
-                status = "Rejected"
-                error_message = f"Output mismatch: Expected {len(expected_lines)} lines, but got {len(actual_lines)}."
-            else:
-                mismatches = [f"Line {i+1}: Expected '{expected}', got '{actual}'"
-                              for i, (actual, expected) in enumerate(zip(actual_lines, expected_lines))
-                              if actual != expected]
-                if mismatches:
-                    status = "Rejected"
-                    error_message = "; ".join(mismatches)
-                else:
-                    status = "Accepted"
-                    error_message = ""
+#             if stderr:
+#                 status = "Error"
+#                 error_message = stderr
+#             elif len(actual_lines) != len(expected_lines):
+#                 status = "Rejected"
+#                 error_message = f"Output mismatch: Expected {len(expected_lines)} lines, but got {len(actual_lines)}."
+#             else:
+#                 mismatches = [f"Line {i+1}: Expected '{expected}', got '{actual}'"
+#                               for i, (actual, expected) in enumerate(zip(actual_lines, expected_lines))
+#                               if actual != expected]
+#                 if mismatches:
+#                     status = "Rejected"
+#                     error_message = "; ".join(mismatches)
+#                 else:
+#                     status = "Accepted"
+#                     error_message = ""
 
-            results.append({
-                "input": test.get("input", ""),
-                "expected_output": expected_lines,
-                "actual_output": actual_lines,
-                "status": status,
-                "error_message": error_message
-            })
+#             results.append({
+#                 "input": test.get("input", ""),
+#                 "expected_output": expected_lines,
+#                 "actual_output": actual_lines,
+#                 "status": status,
+#                 "error_message": error_message
+#             })
 
-        except requests.exceptions.Timeout:
-            logger.error("Piston API request timed out.", exc_info=True)
-            msg = "The code execution timed out. Please check for infinite loops or inefficient code."
-            results.append({
-                "input": test.get("input", ""),
-                "expected_output": test.get("expected_output", []),
-                "actual_output": [],
-                "status": "Error",
-                "error_message": msg
-            })
-            break
+#         except requests.exceptions.Timeout:
+#             logger.error("Piston API request timed out.", exc_info=True)
+#             msg = "The code execution timed out. Please check for infinite loops or inefficient code."
+#             results.append({
+#                 "input": test.get("input", ""),
+#                 "expected_output": test.get("expected_output", []),
+#                 "actual_output": [],
+#                 "status": "Error",
+#                 "error_message": msg
+#             })
+#             break
 
-        except requests.exceptions.HTTPError as http_err:
-            logger.error(f"Piston API returned an HTTP error: {http_err}", exc_info=True)
-            msg = f"An error occurred with the code execution engine (HTTP {http_err.response.status_code})."
-            results.append({
-                "input": test.get("input", ""),
-                "expected_output": test.get("expected_output", []),
-                "actual_output": [],
-                "status": "Error",
-                "error_message": msg
-            })
-            break
+#         except requests.exceptions.HTTPError as http_err:
+#             logger.error(f"Piston API returned an HTTP error: {http_err}", exc_info=True)
+#             msg = f"An error occurred with the code execution engine (HTTP {http_err.response.status_code})."
+#             results.append({
+#                 "input": test.get("input", ""),
+#                 "expected_output": test.get("expected_output", []),
+#                 "actual_output": [],
+#                 "status": "Error",
+#                 "error_message": msg
+#             })
+#             break
 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Piston API request failed: {e}", exc_info=True)
-            msg = "Could not connect to the code execution engine. Please try again later."
-            results.append({
-                "input": test.get("input", ""),
-                "expected_output": test.get("expected_output", []),
-                "actual_output": [],
-                "status": "Error",
-                "error_message": msg
-            })
-            break
+#         except requests.exceptions.RequestException as e:
+#             logger.error(f"Piston API request failed: {e}", exc_info=True)
+#             msg = "Could not connect to the code execution engine. Please try again later."
+#             results.append({
+#                 "input": test.get("input", ""),
+#                 "expected_output": test.get("expected_output", []),
+#                 "actual_output": [],
+#                 "status": "Error",
+#                 "error_message": msg
+#             })
+#             break
 
-    return results, error_output
+#     return results, error_output
 
 def home(request):
     # If the user is authenticated, redirect them to the dashboard.
@@ -291,63 +293,80 @@ def question_detail(request, pk):
         if not q.module or not q.module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
+    # Variables for managing the asynchronous state
+    task_id = request.session.get(f'submission_task_id_{pk}')
+    results = None
+    error = None
+    
+    # Get last saved code/language from session or last submission
     code = request.session.get(f'code_{pk}', '')
     lang = request.session.get(f'language_{pk}', 'python')
-    error = stderr = results = None
 
-    if not code:
-        last = Submission.objects.filter(user=request.user, question=q).first()
-        if last:
-            code, lang = last.code, last.language
-
+    # 1. Handle submission attempt (POST)
     if request.method == "POST":
         code = request.POST.get("code", "").strip()
         lang = request.POST.get("language", "python")
+        
         if not code:
-            error = "Code cannot be empty"
+            messages.error(request, "Code cannot be empty")
         else:
-            results, stderr = execute_code(code, lang, q.test_cases)
-            sub, created = Submission.objects.get_or_create(
-                user=request.user, question=q,
-                defaults={'code': code, 'language': lang, 'status': 'Pending'}
-            )
-            sub.code = code
-            sub.language = lang
-            all_accepted = results and all(r["status"] == "Accepted" for r in results)
-            sub.status = "Accepted" if all_accepted else "Rejected" if results else "Pending"
-            sub.output = "\n".join(results[0]["actual_output"]) if results else ""
-            sub.error = stderr or ""
-            sub.save()
-            if all_accepted and q.module:
-                module_questions = q.module.questions.all()
-                solved_count = Submission.objects.filter(
-                    user=request.user,
-                    question__in=module_questions,
-                    status="Accepted"
-                ).values("question").distinct().count()
-
-                if solved_count == module_questions.count():
-                    from .models import ModuleCompletion  # import at the top if needed
-                    ModuleCompletion.objects.get_or_create(user=request.user, module=q.module)
+            # ⭐ ASYNCHRONOUS CALL: Enqueue the code execution task
+            task = process_practice_submission.delay(request.user.id, q.id, code, lang)
             
-
-            # ✅ Auto mark module as completed
-            if q.module:
-                module_questions = q.module.questions.all()
-                accepted_count = Submission.objects.filter(
-                    user=request.user,
-                    question__in=module_questions,
-                    status="Accepted"
-                ).values("question").distinct().count()
-
-                if accepted_count == module_questions.count():
-                    ModuleCompletion.objects.get_or_create(user=request.user, module=q.module)
-
+            # Store task ID and code/lang for session tracking
+            request.session[f'submission_task_id_{pk}'] = task.id
             request.session[f'code_{pk}'] = code
             request.session[f'language_{pk}'] = lang
             request.session.modified = True
 
-            messages.success(request, "Code submitted!") if not stderr else messages.error(request, stderr)
+            messages.info(request, "Your code is being processed in the background. Please wait or check back shortly.")
+            # Redirect immediately to prevent synchronous waiting
+            return redirect('question_detail', pk=pk)
+
+    # 2. Handle status check and display results (GET)
+    if task_id:
+        task_result = AsyncResult(task_id)
+        
+        if task_result.ready():
+            # Task finished, retrieve result and clean up
+            request.session.pop(f'submission_task_id_{pk}', None)
+            request.session.modified = True
+            
+            # Fetch the updated submission object (saved by the Celery task)
+            latest_submission = Submission.objects.filter(user=request.user, question=q).order_by('-submitted_at').first()
+            
+            if latest_submission:
+                # The 'output' field now contains the JSON list of test case results
+                try:
+                    results = json.loads(latest_submission.output)
+                except json.JSONDecodeError:
+                    results = None
+                
+                # Set dynamic messages based on the final status
+                if latest_submission.status == "Accepted":
+                    messages.success(request, "Code Accepted! All test cases passed.")
+                elif latest_submission.status == 'Error':
+                    messages.error(request, f"Code Execution Error: {latest_submission.error}")
+                    error = latest_submission.error # Pass error to context for display
+                else: # Rejected or Pending (if something went wrong with status setting)
+                    messages.warning(request, "Code Rejected. Some test cases failed.")
+            
+            task_id = None # Task is resolved
+
+        else:
+            # Task is still running
+            messages.info(request, f"Code submission is processing... Status: {task_result.status}")
+
+    # 3. Load initial code/last submission code for editor if nothing is in session/results
+    if not code:
+        last_submission = Submission.objects.filter(user=request.user, question=q).order_by('-submitted_at').first()
+        if last_submission:
+            code, lang = last_submission.code, last_submission.language
+            if not results and last_submission.output:
+                try:
+                    results = json.loads(last_submission.output)
+                except json.JSONDecodeError:
+                    pass
 
     return render(request, "codingapp/question_detail.html", {
         "question": q,
@@ -355,8 +374,8 @@ def question_detail(request, pk):
         "selected_language": lang,
         "results": results,
         "error": error,
-        "error_output": stderr,
-        "supported_languages": SUPPORTED_LANGUAGES, # <--- CRITICAL ADDITION
+        "task_id": task_id, # Pass task_id to the template for client-side polling
+        "supported_languages": settings.SUPPORTED_LANGUAGES, 
     })
 
 from django.views.decorators.http import require_POST
@@ -554,6 +573,7 @@ def assessment_quiz(request, assessment_id):
         'questions': questions,
         'end_time': deadline.isoformat(),      # This fixes the timer
         'all_questions': nav_questions_data,  # This provides data for the nav bar
+        'focus_mode': True,  # 👈 ADD THIS LINE
     }
     
     return render(request, 'codingapp/assessment_quiz.html', context)
@@ -669,7 +689,7 @@ def submit_assessment_code(request, assessment_id, question_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
     current_question_obj = get_object_or_404(Question, id=question_id)
 
-    # Permission checks
+    # Permission checks (kept as is)
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
         if not assessment.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
@@ -683,46 +703,90 @@ def submit_assessment_code(request, assessment_id, question_id):
     deadline = session.start_time + timezone.timedelta(minutes=assessment.duration_minutes)
     read_only = timezone.now() > deadline
 
-    # Handle POST request for new code submission
+    # Variables for managing asynchronous state and results
+    task_id = request.session.get(f'assessment_task_id_{assessment_id}_{question_id}')
+    submission_results = None
+    latest_submission = None
+
+    # 1. Handle POST request (Submission)
     if request.method == "POST" and not read_only:
         code = request.POST.get("code", "").strip()
         lang = request.POST.get("language", "python")
+        
         if not code:
             messages.error(request, "Code cannot be empty.")
         else:
-            results, error_output = execute_code(code, lang, current_question_obj.test_cases)
-            score = sum(1 for r in results if r["status"] == "Accepted")
-
-            AssessmentSubmission.objects.update_or_create(
-                user=request.user, assessment=assessment, question=current_question_obj,
-                defaults={
-                    'code': code,
-                    'language': lang,
-                    'output': "\n".join(res["actual_output"][0] for res in results if res.get("actual_output")),
-                    'error': error_output or "\n".join(res.get("error_message", "") for res in results),
-                    'score': score
-                }
+            # ⭐ ASYNCHRONOUS CALL: Enqueue the assessment submission task
+            task = process_assessment_submission.delay(
+                request.user.id, assessment.id, current_question_obj.id, code, lang
             )
-        # Redirect after POST to show results on the reloaded page
-        return redirect('submit_assessment_code', assessment_id=assessment.id, question_id=question_id)
+            
+            # Store task ID and new code/lang in session
+            request.session[f'assessment_task_id_{assessment_id}_{question_id}'] = task.id
+            request.session['assessment_code'] = code # Store code temporarily in session
+            request.session['assessment_lang'] = lang # Store lang temporarily in session
+            request.session.modified = True
+            
+            messages.info(request, "Submission is being processed in the background.")
+            # Redirect immediately to show loading/pending state
+            return redirect('submit_assessment_code', assessment_id=assessment.id, question_id=question_id)
 
-    # --- THIS IS THE FIX: Logic for GET request to show results ---
-    submission_results = None
+    # 2. Handle GET request (Status Check and Display)
+
+    # First, try to get the latest submission from the database
     latest_submission = AssessmentSubmission.objects.filter(
         assessment=assessment, question=current_question_obj, user=request.user
-    ).first()
+    ).order_by('-submitted_at').first()
 
-    if latest_submission:
-        # Re-run the saved code to generate the detailed result breakdown for display
-        submission_results, _ = execute_code(latest_submission.code, latest_submission.language, current_question_obj.test_cases)
+    if task_id:
+        task_result = AsyncResult(task_id)
+        
+        if task_result.ready():
+            # Task finished, retrieve result and clean up
+            request.session.pop(f'assessment_task_id_{assessment_id}_{question_id}', None)
+            request.session.modified = True
+            
+            # Re-fetch submission to get the updated status and output from the task
+            latest_submission = AssessmentSubmission.objects.filter(
+                assessment=assessment, question=current_question_obj, user=request.user
+            ).order_by('-submitted_at').first()
+            
+            if latest_submission and latest_submission.output:
+                try:
+                    # Output field contains JSON list of test results
+                    submission_results = json.loads(latest_submission.output)
+                except json.JSONDecodeError:
+                    submission_results = None
+                
+                # Set dynamic messages based on the final status
+                if latest_submission.score == len(current_question_obj.test_cases):
+                    messages.success(request, "Code Accepted! All test cases passed.")
+                elif latest_submission.error:
+                    messages.error(request, f"Code Execution Error: {latest_submission.error}")
+                else:
+                    messages.warning(request, "Code Rejected. Some test cases failed.")
+        else:
+            # Task is still running
+            messages.info(request, f"Submission is processing... Status: {task_result.status}")
 
-    # Prepare data for rendering the template
-    code = latest_submission.code if latest_submission else ""
-    lang = latest_submission.language if latest_submission else "python"
+    # 3. Prepare data for rendering the template
+    
+    # Load code/lang from latest submission or session (for pending task)
+    code = latest_submission.code if latest_submission else request.session.get('assessment_code', "")
+    lang = latest_submission.language if latest_submission else request.session.get('assessment_lang', 'python')
+
     is_fully_solved = latest_submission and latest_submission.score == len(current_question_obj.test_cases)
     final_read_only = read_only or is_fully_solved
 
-    # Prepare data for the question navigation bar
+    # Use existing submission results if available (for page reloads after completion)
+    if latest_submission and not submission_results and latest_submission.output:
+         try:
+            submission_results = json.loads(latest_submission.output)
+         except json.JSONDecodeError:
+            pass
+
+
+    # Prepare data for the question navigation bar (kept as is)
     all_qs = AssessmentQuestion.objects.filter(assessment=assessment).select_related('question').order_by('order')
     nav_questions = []
     for aq in all_qs:
@@ -740,14 +804,15 @@ def submit_assessment_code(request, assessment_id, question_id):
         "question": current_question_obj,
         "code": code,
         "selected_language": lang,
-        "supported_languages": SUPPORTED_LANGUAGES,
+        "supported_languages": settings.SUPPORTED_LANGUAGES,
         "read_only": final_read_only,
         "end_time": deadline.isoformat(),
         "all_questions": nav_questions,
-        "results": submission_results,  # This now contains the data to display
+        "results": submission_results,
+        "task_id": task_id, # Pass task_id to the template for client-side polling
+        "focus_mode": True, # 👈 ADD THIS LINE
     }
     return render(request, "codingapp/submit_assessment_code.html", context)
-
     
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import user_passes_test
@@ -1912,49 +1977,44 @@ import json
 @require_POST
 def execute_code_api(request, question_id):
     """
-    API endpoint to execute code via AJAX without a full page reload.
-    This view is designed to be called by a JavaScript client.
+    API endpoint to execute code via AJAX, enqueueing the task to Celery
+    and returning the Task ID for polling.
     """
     try:
         # 1. Parse the incoming JSON data from the request body
         data = json.loads(request.body)
-        code = data.get("code", "")
+        code = data.get("code", "").strip()
         language = data.get("language", "python")
 
-        # 2. Get the question object to access its test cases
+        # 2. Check for required data
+        if not code or not language:
+            return JsonResponse({"success": False, "error": "Missing code or language."}, status=400)
+
+        # 3. Get the question object (needed for ID)
+        # Note: We keep this synchronous call as it is fast DB query, and necessary for validation.
         question = get_object_or_404(Question, pk=question_id)
-
-        # 3. Reuse our existing, robust code execution logic
-        results, error_output = execute_code(code, language, question.test_cases)
-
-        # 4. Save the submission to the database, just like the original view
-        # This ensures user progress is still tracked
-        submission, _ = Submission.objects.update_or_create(
-            user=request.user,
-            question=question,
-            defaults={
-                'code': code,
-                'language': language,
-                'status': "Accepted" if all(r["status"] == "Accepted" for r in results) else "Rejected",
-                'output': results[0]['actual_output'] if results and results[0].get('actual_output') else "",
-                'error': error_output or "",
-            }
-        )
         
-        # 5. Return the results as a JSON response
+        # 4. ⭐ ASYNCHRONOUS CALL: Enqueue the code execution task
+        # The task (process_practice_submission) handles running test cases and saving the submission.
+        task = process_practice_submission.delay(request.user.id, question.id, code, language)
+        
+        # 5. Return the Task ID immediately. The client will use this to poll for results.
         return JsonResponse({
             "success": True,
-            "results": results,
-            "error_output": error_output
+            "task_id": task.id,
+            "message": "Code submitted for background processing."
         })
 
     except json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
+        logger.error("JSON Decode Error in execute_code_api")
+        return JsonResponse({"success": False, "error": "Invalid JSON payload."}, status=400)
     except Exception as e:
+        # Catch unexpected errors (like DB errors or misconfigured imports)
         logger.error(f"Error in execute_code_api: {e}", exc_info=True)
-        return JsonResponse({"success": False, "error": "An unexpected server error occurred."}, status=500)
+        return JsonResponse({"success": False, "error": f"An unexpected server error occurred: {str(e)}"}, status=500)
 
-        # NEW FUNCTION: Export Assessment Leaderboard to CSV
+# NEW FUNCTION: Export Assessment Leaderboard to CSV
+
 @user_passes_test(is_admin_or_teacher)
 def export_assessment_leaderboard_csv(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
@@ -2036,3 +2096,28 @@ def export_assessment_leaderboard_csv(request, assessment_id):
         ])
 
     return response
+
+# 👇 ADD THIS ENTIRE NEW VIEW FUNCTION
+@login_required
+def check_submission_status(request, task_id):
+    """
+    API endpoint for checking the status of a Celery task (used for polling).
+    """
+    task = AsyncResult(task_id)
+    response_data = {
+        'task_id': task_id,
+        'status': task.status,
+        'ready': task.ready(),
+    }
+    
+    if task.ready():
+        try:
+            result = task.get(timeout=1) 
+            response_data['final_status'] = result.get('final_status')
+            response_data['results'] = result.get('results')
+            response_data['error'] = result.get('error')
+        except Exception as e:
+            response_data['final_status'] = 'FAILURE'
+            response_data['error'] = str(e)
+            
+    return JsonResponse(response_data)
