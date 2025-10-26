@@ -126,6 +126,7 @@ class AssessmentForm(forms.ModelForm):
             'duration_minutes': forms.NumberInput(attrs={'class': 'form-control'}),
             'groups': forms.SelectMultiple(attrs={'class': 'form-control'}),
             'quiz': forms.Select(attrs={'class': 'form-control'}),
+            'questions': forms.SelectMultiple(attrs={'class': 'form-control'}),
         }
 
 

@@ -995,19 +995,37 @@ def teacher_assessment_list(request):
     assessments = Assessment.objects.all()
     return render(request, 'codingapp/teacher_assessment_list.html', {'assessments': assessments})
 
+from .forms import AssessmentForm  # Ensure AssessmentForm is imported
+from django.shortcuts import render, redirect
+from django.contrib.auth.decorators import user_passes_test
+from .models import Assessment, AssessmentQuestion # It's good practice to import models you work with
+
+def is_teacher(user):
+    return user.is_staff
+
 @user_passes_test(is_teacher)
 def teacher_add_assessment(request):
     if request.method == "POST":
         form = AssessmentForm(request.POST)
         if form.is_valid():
-            form.save()
+            # Step 1: Save the main Assessment object. This also saves simple M2M fields like 'groups'.
+            assessment = form.save() 
+            
+            # Step 2: Manually handle the 'questions' relationship using the 'through' model.
+            # This is the same logic that works correctly in your edit view.
+            selected_questions = form.cleaned_data.get('questions')
+            
+            if selected_questions:
+                for question in selected_questions:
+                    AssessmentQuestion.objects.create(assessment=assessment, question=question)
+
+            messages.success(request, 'Assessment created successfully!')
             return redirect('teacher_assessment_list')
     else:
         form = AssessmentForm()
+        
     return render(request, 'codingapp/teacher_assessment_form.html', {'form': form, 'action': 'Add'})
-
-from .models import Assessment, AssessmentQuestion # Make sure AssessmentQuestion is imported
-
+    
 @user_passes_test(is_teacher)
 def teacher_edit_assessment(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
