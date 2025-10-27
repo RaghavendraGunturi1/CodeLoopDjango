@@ -2,7 +2,7 @@
 {% block title %}Add Note{% endblock %}
 {% block content %}
 <div class="container py-4">
-  <h2 class="mb-4">Upload Note</h2>
+  <h2 class="mb-4">Upload Notes / Study Material</h2>
   <form method="post" enctype="multipart/form-data" class="card p-4 shadow-sm">
     {% csrf_token %}
     {{ form.as_p }}

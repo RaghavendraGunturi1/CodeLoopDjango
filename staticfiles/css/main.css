@@ -97,8 +97,8 @@
   --bs-link-color: #00f0ff;
   --bs-link-color-rgb: 0, 240, 255;
   --bs-link-decoration: underline;
-  --bs-link-hover-color: #00c0cc;
-  --bs-link-hover-color-rgb: 0, 192, 204;
+  --bs-link-hover-color: rgb(76.5, 244.5, 255);
+  --bs-link-hover-color-rgb: 77, 244, 255;
   --bs-code-color: #d63384;
   --bs-highlight-color: #a0aec0;
   --bs-highlight-bg: rgb(255, 242.6, 205.4);
@@ -1861,15 +1861,15 @@ progress {
   --bs-table-bg-type: initial;
   --bs-table-color-state: initial;
   --bs-table-bg-state: initial;
-  --bs-table-color: var(--bs-emphasis-color);
+  --bs-table-color: #a0aec0;
   --bs-table-bg: var(--bs-body-bg);
-  --bs-table-border-color: var(--bs-border-color);
+  --bs-table-border-color: rgba(255, 255, 255, 0.1);
   --bs-table-accent-bg: transparent;
-  --bs-table-striped-color: var(--bs-emphasis-color);
+  --bs-table-striped-color: #e2e8f0;
   --bs-table-striped-bg: rgba(var(--bs-emphasis-color-rgb), 0.05);
-  --bs-table-active-color: var(--bs-emphasis-color);
+  --bs-table-active-color: #a0aec0;
   --bs-table-active-bg: rgba(var(--bs-emphasis-color-rgb), 0.1);
-  --bs-table-hover-color: var(--bs-emphasis-color);
+  --bs-table-hover-color: #e2e8f0;
   --bs-table-hover-bg: rgba(var(--bs-emphasis-color-rgb), 0.075);
   width: 100%;
   margin-bottom: 1rem;
@@ -4344,7 +4344,7 @@ textarea.form-control-lg {
   --bs-card-title-color: ;
   --bs-card-subtitle-color: ;
   --bs-card-border-width: var(--bs-border-width);
-  --bs-card-border-color: rgba(255, 255, 255, 0.1);
+  --bs-card-border-color: var(--bs-border-color-translucent);
   --bs-card-border-radius: var(--bs-border-radius);
   --bs-card-box-shadow: ;
   --bs-card-inner-border-radius: calc(var(--bs-border-radius) - (var(--bs-border-width)));
@@ -4354,7 +4354,7 @@ textarea.form-control-lg {
   --bs-card-cap-color: ;
   --bs-card-height: ;
   --bs-card-color: ;
-  --bs-card-bg: #1a202c;
+  --bs-card-bg: var(--bs-body-bg);
   --bs-card-img-overlay-padding: 1rem;
   --bs-card-group-margin: 0.75rem;
   position: relative;
@@ -11986,13 +11986,6 @@ body {
           backdrop-filter: blur(5px);
 }
 
-.card {
-  background-color: rgba(26, 32, 44, 0.85);
-  -webkit-backdrop-filter: blur(10px);
-          backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
 .btn-primary {
   box-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
   transition: all 0.3s ease;
@@ -12008,4 +12001,120 @@ body {
   border-left: 3px solid #00f0ff !important;
   color: #fff !important;
   text-shadow: 0 0 5px rgba(0, 240, 255, 0.7);
+}
+
+.main-content-card {
+  background-image: linear-gradient(180deg, rgb(16.6833333333, 21.8166666667, 29.5166666667) 0%, #0d1117 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+  border-radius: 0.8rem;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+  padding: 2rem;
+  margin-bottom: 2rem;
+}
+.main-content-card input, .main-content-card textarea, .main-content-card select {
+  background-color: rgb(25.8916666667, 33.8583333333, 45.8083333333) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #e2e8f0 !important;
+}
+.main-content-card input:focus, .main-content-card textarea:focus, .main-content-card select:focus {
+  border-color: #00f0ff !important;
+  box-shadow: 0 0 5px rgba(0, 240, 255, 0.5) !important;
+}
+
+.floating-nav-wrapper {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  padding: 0.5rem;
+  background-color: rgba(13, 17, 23, 0.7);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  border-radius: 50px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.floating-nav-list {
+  display: flex;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  align-items: center;
+}
+
+.floating-nav-list .nav-item {
+  position: relative;
+  z-index: 2;
+}
+
+.floating-nav-list .nav-link {
+  display: block;
+  padding: 0.5rem 1.25rem;
+  border-radius: 50px;
+  color: #a0aec0;
+  transition: color 0.3s;
+  font-weight: bold;
+  text-decoration: none;
+}
+
+.floating-nav-list .nav-link:hover {
+  color: #00f0ff;
+}
+
+/* The Moving Indicator (The "Lamp") */
+#nav-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background-color: rgba(0, 240, 255, 0.1);
+  border-radius: 50px;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Style for the active link text, since the indicator handles the background */
+.floating-nav-list .nav-link.active {
+  color: #00f0ff;
+}
+
+#spline-full-screen-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw; /* Keep it full screen */
+  height: 100vh;
+  overflow: hidden;
+  z-index: 100;
+  pointer-events: auto; /* FIX: MUST BE AUTO FOR INTERACTION */
+}
+
+#spline-crop-container {
+  position: absolute;
+  top: -3vh;
+  left: -3vw;
+  width: 106vw;
+  height: 106vh;
+  /* FIX: Shift the visible part of the 3D scene to the right */
+  transform: scale(1.05) translateX(20vw); /* <-- ADD TRANSLATEX to shift right */
+}
+#spline-crop-container iframe {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  /* Ensure the iframe itself doesn't block the background */
+  background-color: transparent;
+}
+
+/* Ensure content and background boxes are stacked correctly */
+.main-content {
+  position: relative;
+  z-index: 900 !important; /* Must be above the 3D scene (z-index 100) */
 }/*# sourceMappingURL=main.css.map */

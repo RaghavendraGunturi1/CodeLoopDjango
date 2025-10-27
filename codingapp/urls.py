@@ -6,6 +6,7 @@ from .views import (
     notice_list, add_notice, notice_detail, student_performance_detail, teacher_question_form
 )
 
+
 urlpatterns = [
     # Core Routes
     path('', views.home, name='home'),
