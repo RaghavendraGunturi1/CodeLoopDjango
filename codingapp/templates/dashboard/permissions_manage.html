@@ -1,0 +1,163 @@
+{% extends "codingapp/base.html" %}
+{% load static %}
+{% block content %}
+
+<div class="container mt-5">
+  <h2 class="mb-4">🔐 Permission Management (Admin Panel)</h2>
+
+  {% for message in messages %}
+    <div class="alert alert-info">{{ message }}</div>
+  {% endfor %}
+
+  <!-- HOD SECTION -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center"
+         data-bs-toggle="collapse" data-bs-target="#hodSection" aria-expanded="true" style="cursor:pointer;">
+      <h5 class="mb-0">🏫 Manage HODs</h5>
+      <span class="small"><i class="bi bi-chevron-down"></i></span>
+    </div>
+
+    <div id="hodSection" class="collapse show">
+      <div class="card-body">
+        <table class="table table-striped align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>HOD</th>
+              <th>Permission</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+              {% if user.role.name|lower == "hod" %}
+                {% for perm in permissions %}
+                <tr>
+                  <td>{{ user.user.username }}</td>
+                  <td>{{ perm.name }}</td>
+                  <td>
+                    <form method="POST" style="display:inline;">
+                      {% csrf_token %}
+                      <input type="hidden" name="user_id" value="{{ user.id }}">
+                      <input type="hidden" name="perm_id" value="{{ perm.id }}">
+                      {% if perm in user.custom_permissions.all %}
+                        <button name="action" value="remove" class="btn btn-sm btn-danger">Revoke</button>
+                      {% else %}
+                        <button name="action" value="add" class="btn btn-sm btn-success">Grant</button>
+                      {% endif %}
+                    </form>
+                  </td>
+                </tr>
+                {% endfor %}
+              {% endif %}
+            {% empty %}
+              <tr><td colspan="3" class="text-center">No HODs found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TEACHERS SECTION -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-info text-dark d-flex justify-content-between align-items-center"
+         data-bs-toggle="collapse" data-bs-target="#teacherSection" aria-expanded="false" style="cursor:pointer;">
+      <h5 class="mb-0">🧑‍🏫 Manage Teachers</h5>
+      <span class="small"><i class="bi bi-chevron-down"></i></span>
+    </div>
+
+    <div id="teacherSection" class="collapse">
+      <div class="card-body">
+        <table class="table table-striped align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Teacher</th>
+              <th>Permission</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+              {% if user.role.name|lower == "teacher" %}
+                {% for perm in permissions %}
+                <tr>
+                  <td>{{ user.user.username }}</td>
+                  <td>{{ perm.name }}</td>
+                  <td>
+                    <form method="POST" style="display:inline;">
+                      {% csrf_token %}
+                      <input type="hidden" name="user_id" value="{{ user.id }}">
+                      <input type="hidden" name="perm_id" value="{{ perm.id }}">
+                      {% if perm in user.custom_permissions.all %}
+                        <button name="action" value="remove" class="btn btn-sm btn-danger">Revoke</button>
+                      {% else %}
+                        <button name="action" value="add" class="btn btn-sm btn-success">Grant</button>
+                      {% endif %}
+                    </form>
+                  </td>
+                </tr>
+                {% endfor %}
+              {% endif %}
+            {% empty %}
+              <tr><td colspan="3" class="text-center">No teachers found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- STUDENTS SECTION -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center"
+         data-bs-toggle="collapse" data-bs-target="#studentSection" aria-expanded="false" style="cursor:pointer;">
+      <h5 class="mb-0">🎓 Manage Students</h5>
+      <span class="small"><i class="bi bi-chevron-down"></i></span>
+    </div>
+
+    <div id="studentSection" class="collapse">
+      <div class="card-body">
+        <table class="table table-striped align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Student</th>
+              <th>Permission</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+              {% if user.role.name|lower == "student" %}
+                {% for perm in permissions %}
+                <tr>
+                  <td>{{ user.user.username }}</td>
+                  <td>{{ perm.name }}</td>
+                  <td>
+                    <form method="POST" style="display:inline;">
+                      {% csrf_token %}
+                      <input type="hidden" name="user_id" value="{{ user.id }}">
+                      <input type="hidden" name="perm_id" value="{{ perm.id }}">
+                      {% if perm in user.custom_permissions.all %}
+                        <button name="action" value="remove" class="btn btn-sm btn-danger">Revoke</button>
+                      {% else %}
+                        <button name="action" value="add" class="btn btn-sm btn-success">Grant</button>
+                      {% endif %}
+                    </form>
+                  </td>
+                </tr>
+                {% endfor %}
+              {% endif %}
+            {% empty %}
+              <tr><td colspan="3" class="text-center">No students found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bootstrap Icons (optional for chevron arrows) -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+
+{% endblock %}

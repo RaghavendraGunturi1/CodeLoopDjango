@@ -4,6 +4,64 @@ from django.core.exceptions import ValidationError
 from django.utils.text import slugify
 from django.utils import timezone
 
+# ==============================================================
+# 🧱 RBAC MODELS (Role, Permission, Department) — STEP 1
+# ==============================================================
+from django.conf import settings
+from django.db import models
+from django.contrib.auth import get_user_model
+from django.dispatch import receiver
+from django.db.models.signals import post_save
+
+User = get_user_model()
+
+class ActionPermission(models.Model):
+    code = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=150)
+    description = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return self.name or self.code
+
+    class Meta:
+        verbose_name = "Action Permission"
+        verbose_name_plural = "Action Permissions"
+
+
+class Role(models.Model):
+    """
+    User roles such as Admin, HOD, Teacher, Student.
+    Each role has a set of default permissions.
+    """
+    name = models.CharField(max_length=50, unique=True)
+    description = models.TextField(blank=True, null=True)
+    permissions = models.ManyToManyField(
+        ActionPermission, blank=True, related_name="roles"
+    )
+
+    def __str__(self):
+        return self.name
+
+
+class Department(models.Model):
+    """
+    Academic departments managed by a Head of Department.
+    """
+    name = models.CharField(max_length=200, unique=True)
+    code = models.CharField(max_length=20, unique=True)
+    # Will link to a UserProfile once the HOD is assigned
+    hod = models.OneToOneField(
+        'UserProfile',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='managed_department'
+    )
+
+    def __str__(self):
+        return self.name
+
+
 # ---- Helper for test case structure ----
 def validate_test_cases(value):
     if not isinstance(value, list):
@@ -154,21 +212,37 @@ class AssessmentSession(models.Model):
     class Meta:
         unique_together = ['user', 'assessment']
 
-# ---- UserProfile model ----
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     profile_picture = models.ImageField(
         upload_to='profiles/', 
         blank=True, 
         null=True,
-        # Set the path to your default image inside the static directory
         default='profiles/default_profile.png' 
     )
     full_name = models.CharField(max_length=100, blank=True)
 
+    # 🧩 New RBAC fields
+    role = models.ForeignKey('Role', on_delete=models.SET_NULL, null=True, blank=True)
+    department = models.ForeignKey('Department', on_delete=models.SET_NULL, null=True, blank=True)
+    custom_permissions = models.ManyToManyField('ActionPermission', blank=True, related_name='users_with_custom_permissions')
+
     def __str__(self):
         return self.full_name or self.user.username
-    
+
+    # 🧠 Helper methods for permission aggregation
+    def get_role_permissions(self):
+        if self.role:
+            return set(self.role.permissions.all())
+        return set()
+
+    def get_user_permissions(self):
+        return set(self.custom_permissions.all())
+
+    def get_all_permissions(self):
+        # Union of role + user specific permissions
+        return {p.code for p in self.get_role_permissions() | self.get_user_permissions()}
+ 
 from django.db import models
 from django.contrib.auth.models import User
 
@@ -310,3 +384,149 @@ def create_profile(sender, instance, created, **kwargs):
             # We set the name of the file expected to be in the /media/profiles/ directory.
             profile.profile_picture = 'default_profile.png' 
             profile.save()
+
+
+from django.db.utils import OperationalError, ProgrammingError
+
+def ensure_default_permissions():
+    """Ensure all default permissions exist in the DB."""
+    try:
+        for code, name, desc in DEFAULT_PERMISSIONS:
+            perm, created = ActionPermission.objects.get_or_create(
+                code=code,
+                defaults={"name": name, "description": desc},
+            )
+            if created:
+                print(f"✅ Created permission: {code}")
+    except (OperationalError, ProgrammingError):
+        # Database not ready (e.g., during migrate)
+        pass
+
+
+# ===========================================================
+# 🧩 Default Permission Registry (System-wide)
+# ===========================================================
+DEFAULT_PERMISSIONS = [
+    # --- System / General ---
+    ("view_dashboard", "View Dashboard", "Access the main dashboard"),
+    ("view_profile", "View Profile", "View own profile and info"),
+    ("edit_profile", "Edit Profile", "Update profile details"),
+    ("change_password", "Change Password", "Change user password"),
+
+    # --- User & Role Management ---
+    ("manage_users", "Manage Users", "Create, update, or deactivate users"),
+    ("bulk_edit_users", "Bulk Edit Users", "Edit multiple users at once"),
+    ("assign_roles", "Assign Roles", "Assign roles to users"),
+    ("view_user_list", "View User List", "See all users"),
+    ("view_user_detail", "View User Detail", "View individual user info"),
+    ("delete_user", "Delete User", "Delete or disable users"),
+    ("manage_departments", "Manage Departments", "Create/edit departments"),
+    ("assign_hod", "Assign HODs", "Assign Head of Department"),
+    ("manage_roles_permissions", "Manage Roles & Permissions", "Manage role-based permissions"),
+
+    # --- Department / HOD Controls ---
+    ("view_department", "View Department", "Access department dashboard"),
+    ("manage_teachers", "Manage Teachers", "Edit or remove teachers"),
+    ("manage_students", "Manage Students", "Edit or remove students"),
+    ("view_hod_dashboard", "View HOD Dashboard", "Access the HOD dashboard"),
+    ("hod_assign_permissions", "HOD Assign Permissions", "Allow HODs to grant permissions"),
+
+    # --- Quiz / Assessment ---
+    ("create_quiz", "Create Quiz", "Create new quizzes"),
+    ("edit_quiz", "Edit Quiz", "Modify existing quizzes"),
+    ("delete_quiz", "Delete Quiz", "Delete quizzes"),
+    ("view_quiz", "View Quiz", "View quiz details"),
+    ("assign_quiz", "Assign Quiz", "Assign quizzes to students"),
+    ("submit_quiz", "Submit Quiz", "Allow students to submit quizzes"),
+    ("grade_quiz", "Grade Quiz", "Evaluate and assign grades"),
+    ("view_results", "View Results", "View quiz results"),
+    ("reset_quiz_attempt", "Reset Quiz Attempt", "Reset quiz submissions"),
+
+    # --- Notes / Materials ---
+    ("upload_notes", "Upload Notes", "Upload study materials"),
+    ("edit_notes", "Edit Notes", "Modify uploaded notes"),
+    ("delete_notes", "Delete Notes", "Remove notes"),
+    ("view_notes", "View Notes", "Access uploaded notes"),
+    ("share_notes", "Share Notes", "Share notes with others"),
+
+    # --- Student Permissions ---
+    ("view_assigned_quizzes", "View Assigned Quizzes", "View quizzes assigned to student"),
+    ("attempt_quiz", "Attempt Quiz", "Take assigned quizzes"),
+    ("view_own_results", "View Own Results", "View personal quiz scores"),
+    ("view_uploaded_notes", "View Uploaded Notes", "View available notes"),
+    ("post_feedback", "Post Feedback", "Submit feedback or questions"),
+    ("view_announcements", "View Announcements", "View teacher/HOD announcements"),
+
+    # --- Admin / System ---
+    ("access_admin_panel", "Access Admin Panel", "Access the main Admin Control Center"),
+    ("system_configuration", "System Configuration", "Change platform settings"),
+    ("manage_permissions", "Manage Permissions", "Manage permission mappings"),
+    ("view_audit_logs", "View Audit Logs", "View recent user actions"),
+    ("backup_database", "Backup Database", "Export backups"),
+    ("restore_database", "Restore Database", "Restore system backups"),
+    ("delete_anything", "Delete Any Object", "Delete any record (superuser only)"),
+]
+
+# ===========================================================
+# 🧠 DEFAULT PERMISSIONS FOR EACH ROLE
+# ===========================================================
+
+ROLE_DEFAULT_PERMISSIONS = {
+    "admin": [  # full system control
+        "*",  # wildcard: all permissions
+    ],
+
+    "hod": [  # department-level control
+        "view_dashboard", "view_profile", "edit_profile",
+        "manage_teachers", "manage_students", "view_department",
+        "assign_teacher", "assign_student",
+        "create_quiz", "edit_quiz", "delete_quiz", "view_quiz", "grade_quiz", "view_results",
+        "upload_notes", "edit_notes", "delete_notes", "view_notes",
+        "hod_assign_permissions", "manage_roles_permissions",
+        "view_hod_dashboard",
+        "view_announcements", "post_feedback"
+    ],
+
+    "teacher": [  # content and quiz management
+        "view_dashboard", "view_profile", "edit_profile",
+        "create_quiz", "edit_quiz", "view_quiz", "view_results",
+        "upload_notes", "edit_notes", "delete_notes", "view_notes",
+        "view_assigned_quizzes", "grade_quiz",
+        "view_announcements", "post_feedback"
+    ],
+
+    "student": [  # limited self access
+        "view_dashboard", "view_profile", "edit_profile",
+        "view_assigned_quizzes", "attempt_quiz", "view_own_results",
+        "view_uploaded_notes", "view_announcements", "post_feedback"
+    ],
+}
+
+from django.db.utils import OperationalError, ProgrammingError
+
+def assign_default_permissions_to_roles():
+    """
+    Assign predefined permissions to each system role.
+    Admin gets all permissions.
+    """
+    try:
+        from codingapp.models import Role, ActionPermission
+
+        for role_name, perm_codes in ROLE_DEFAULT_PERMISSIONS.items():
+            role, _ = Role.objects.get_or_create(name=role_name)
+
+            if "*" in perm_codes:
+                # Admin: all permissions
+                perms = ActionPermission.objects.all()
+                role.permissions.set(perms)
+                print(f"✅ Assigned ALL permissions to '{role_name}'")
+            else:
+                perms = ActionPermission.objects.filter(code__in=perm_codes)
+                role.permissions.set(perms)
+                print(f"✅ Assigned {perms.count()} permissions to '{role_name}'")
+
+            role.save()
+
+    except (OperationalError, ProgrammingError):
+        # skip if migrations not ready
+        pass
