@@ -47,6 +47,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+MIDDLEWARE += ["codingapp.middleware.permission_middleware.RoleAccessMiddleware"]
 
 ROOT_URLCONF = 'codingplatform.urls'
 

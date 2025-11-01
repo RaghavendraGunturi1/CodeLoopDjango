@@ -162,3 +162,25 @@ class CourseAdmin(admin.ModelAdmin):
     list_display = ('title', 'difficulty', 'is_public', 'created_by')
     inlines = [CourseContentInline]
     filter_horizontal = ('groups',)
+
+
+from .models import ActionPermission, Role, Department, UserProfile
+
+@admin.register(ActionPermission)
+class ActionPermissionAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "description")
+    search_fields = ("code", "name")
+
+@admin.register(Role)
+class RoleAdmin(admin.ModelAdmin):
+    list_display = ("name", "description")
+    filter_horizontal = ("permissions",)
+
+@admin.register(Department)
+class DepartmentAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "hod")
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ("user", "role", "department")
+    filter_horizontal = ("custom_permissions",)

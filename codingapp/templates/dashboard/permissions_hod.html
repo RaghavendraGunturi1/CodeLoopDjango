@@ -1,0 +1,126 @@
+{% extends "codingapp/base.html" %}
+{% load static %}
+{% block content %}
+
+<div class="container mt-5">
+  <h2 class="mb-4">🎓 HOD Permission Management</h2>
+
+  {% for message in messages %}
+    <div class="alert alert-info">{{ message }}</div>
+  {% endfor %}
+
+  <!-- 🧑‍🏫 TEACHERS COLLAPSIBLE SECTION -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-info text-dark d-flex justify-content-between align-items-center"
+         data-bs-toggle="collapse" data-bs-target="#teachersSection" aria-expanded="true" style="cursor: pointer;">
+      <h5 class="mb-0">🧑‍🏫 Assign Permissions to Teachers</h5>
+      <span class="small text-dark"><i class="bi bi-chevron-down"></i></span>
+    </div>
+
+    <div id="teachersSection" class="collapse show">
+      <div class="card-body">
+        <table class="table table-striped align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Teacher</th>
+              <th>Permission</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if users %}
+              {% if permissions %}
+                {% for user in users %}
+                  {% if user.role.name|lower == "teacher" %}
+                    {% for perm in permissions %}
+                    <tr>
+                      <td>{{ user.user.username }}</td>
+                      <td>{{ perm.name }}</td>
+                      <td>
+                        <form method="POST" style="display:inline;">
+                          {% csrf_token %}
+                          <input type="hidden" name="user_id" value="{{ user.id }}">
+                          <input type="hidden" name="perm_id" value="{{ perm.id }}">
+                          {% if perm in user.custom_permissions.all %}
+                            <button name="action" value="remove" class="btn btn-sm btn-danger">Revoke</button>
+                          {% else %}
+                            <button name="action" value="add" class="btn btn-sm btn-success">Grant</button>
+                          {% endif %}
+                        </form>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  {% endif %}
+                {% endfor %}
+              {% else %}
+                <tr><td colspan="3" class="text-muted text-center">No permissions available to assign.</td></tr>
+              {% endif %}
+            {% else %}
+              <tr><td colspan="3" class="text-center text-muted">No teachers found in your department.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 🎒 STUDENTS COLLAPSIBLE SECTION -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center"
+         data-bs-toggle="collapse" data-bs-target="#studentsSection" aria-expanded="false" style="cursor: pointer;">
+      <h5 class="mb-0">🎒 Assign Permissions to Students</h5>
+      <span class="small"><i class="bi bi-chevron-down"></i></span>
+    </div>
+
+    <div id="studentsSection" class="collapse">
+      <div class="card-body">
+        <table class="table table-striped align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Student</th>
+              <th>Permission</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if users %}
+              {% if permissions %}
+                {% for user in users %}
+                  {% if user.role.name|lower == "student" %}
+                    {% for perm in permissions %}
+                    <tr>
+                      <td>{{ user.user.username }}</td>
+                      <td>{{ perm.name }}</td>
+                      <td>
+                        <form method="POST" style="display:inline;">
+                          {% csrf_token %}
+                          <input type="hidden" name="user_id" value="{{ user.id }}">
+                          <input type="hidden" name="perm_id" value="{{ perm.id }}">
+                          {% if perm in user.custom_permissions.all %}
+                            <button name="action" value="remove" class="btn btn-sm btn-danger">Revoke</button>
+                          {% else %}
+                            <button name="action" value="add" class="btn btn-sm btn-success">Grant</button>
+                          {% endif %}
+                        </form>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  {% endif %}
+                {% endfor %}
+              {% else %}
+                <tr><td colspan="3" class="text-muted text-center">No permissions available to assign.</td></tr>
+              {% endif %}
+            {% else %}
+              <tr><td colspan="3" class="text-center text-muted">No students found in your department.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Optional Bootstrap Icons (for arrow animation) -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+
+{% endblock %}

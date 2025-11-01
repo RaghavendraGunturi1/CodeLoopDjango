@@ -24,6 +24,8 @@ from .models import (
 )
 from .forms import ModuleForm, QuestionForm
 from codingapp import models
+from codingapp.models import Department, Role, ActionPermission, UserProfile
+
 
 # Piston (code execution) API endpoint
 #PISTON_API_URL = "https://emkc.org/api/v2/piston/execute"
@@ -2139,3 +2141,262 @@ def check_submission_status(request, task_id):
             response_data['error'] = str(e)
             
     return JsonResponse(response_data)
+
+
+# ==============================================================
+# 🧩 Permissions Management View (Admin Dashboard)
+# ==============================================================
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from codingapp.models import ActionPermission, Role, UserProfile
+from codingapp.permissions import can_assign
+
+@login_required
+def permissions_manage(request):
+    """Admin dashboard page to view and assign permissions."""
+    profile = request.user.userprofile
+    if not profile or not profile.role or profile.role.name.lower() != "admin":
+        messages.error(request, "You don't have access to this page.")
+        return redirect("dashboard")  # redirect non-admins
+
+    permissions = ActionPermission.objects.all().order_by("code")
+    roles = Role.objects.all().order_by("name")
+    users = UserProfile.objects.select_related("role", "user").order_by("user__username")
+
+    if request.method == "POST":
+        # Assign permission to role
+        role_id = request.POST.get("role_id")
+        perm_id = request.POST.get("perm_id")
+        user_id = request.POST.get("user_id")
+        action = request.POST.get("action")  # add or remove
+
+        if role_id and perm_id:
+            role = Role.objects.get(id=role_id)
+            perm = ActionPermission.objects.get(id=perm_id)
+            if action == "add":
+                role.permissions.add(perm)
+            else:
+                role.permissions.remove(perm)
+            messages.success(request, f"Permission '{perm.name}' updated for role '{role.name}'.")
+            return redirect("permissions_manage")
+
+        if user_id and perm_id:
+            user_profile = UserProfile.objects.get(id=user_id)
+            perm = ActionPermission.objects.get(id=perm_id)
+            if action == "add":
+                user_profile.custom_permissions.add(perm)
+            else:
+                user_profile.custom_permissions.remove(perm)
+            messages.success(request, f"Permission '{perm.name}' updated for user '{user_profile.user.username}'.")
+            return redirect("permissions_manage")
+
+    context = {
+        "permissions": permissions,
+        "roles": roles,
+        "users": users,
+    }
+    return render(request, "dashboard/permissions_manage.html", context)
+
+# ==============================================================
+# 🧩 HOD Permission Management View
+# ==============================================================
+from django.db.models import Q
+
+@login_required
+def permissions_hod(request):
+    """HOD page to assign permissions only within their department."""
+    profile = request.user.userprofile
+
+    # Only allow HODs
+    if not profile or not profile.role or profile.role.name.lower() != "hod":
+        messages.error(request, "You don't have access to this page.")
+        return redirect("dashboard")
+
+    # Permissions limited to HOD’s own allowed set
+    permissions = [
+        p for p in profile.get_all_permissions()
+        if ActionPermission.objects.filter(code=p).exists()
+    ]
+    permissions = ActionPermission.objects.filter(code__in=permissions)
+
+    # Only users in the same department (Teachers or Students)
+    department_users = UserProfile.objects.filter(
+        Q(department=profile.department),
+        Q(role__name__in=["teacher", "student"])
+    ).select_related("role", "user")
+
+    if request.method == "POST":
+        user_id = request.POST.get("user_id")
+        perm_id = request.POST.get("perm_id")
+        action = request.POST.get("action")
+
+        if user_id and perm_id:
+            user_profile = UserProfile.objects.get(id=user_id)
+            perm = ActionPermission.objects.get(id=perm_id)
+
+            # HOD can assign only if HOD personally has the permission
+            if perm.code not in profile.get_all_permissions():
+                messages.error(request, "You cannot assign a permission you don't have.")
+                return redirect("permissions_hod")
+
+            if action == "add":
+                user_profile.custom_permissions.add(perm)
+            else:
+                user_profile.custom_permissions.remove(perm)
+            messages.success(request, f"Permission '{perm.name}' updated for {user_profile.user.username}.")
+            return redirect("permissions_hod")
+
+    context = {
+        "permissions": permissions,
+        "users": department_users,
+    }
+    return render(request, "dashboard/permissions_hod.html", context)
+
+# ==============================================================
+# 🧩 ADMIN CONTROL CENTER
+# ==============================================================
+from django.db.models import Count
+
+@login_required
+def admin_control_center(request):
+    """Admin's master control center."""
+    profile = request.user.userprofile
+    if not profile or profile.role.name.lower() != "admin":
+        messages.error(request, "You don’t have access to this page.")
+        return redirect("dashboard")
+
+    roles = Role.objects.prefetch_related("permissions").all()
+    permissions = ActionPermission.objects.all().order_by("code")
+    departments = Department.objects.prefetch_related("hod").annotate(user_count=Count("userprofile"))
+    users = UserProfile.objects.select_related("role", "department", "user").order_by("user__username")
+
+    # Count users by role
+    role_counts = (
+        UserProfile.objects.values("role__name")
+        .annotate(count=Count("id"))
+        .order_by("role__name")
+    )
+
+    context = {
+        "roles": roles,
+        "permissions": permissions,
+        "departments": departments,
+        "users": users,
+        "role_counts": role_counts,
+    }
+    return render(request, "dashboard/admin_control_center.html", context)
+
+# ==============================================================
+# 🧩 ADMIN: MANAGE USERS
+# ==============================================================
+from django.contrib.auth.models import User
+
+@login_required
+def admin_manage_users(request):
+    """View, add, and edit users and their roles/departments (supports bulk update with diagnostics)."""
+    profile = request.user.userprofile
+    if not profile or profile.role.name.lower() != "admin":
+        messages.error(request, "Access denied.")
+        return redirect("dashboard")
+
+    roles = Role.objects.all().order_by("name")
+    departments = Department.objects.all().order_by("name")
+    users = UserProfile.objects.select_related("user", "role", "department").order_by("user__username")
+
+    # This will hold debug data for display in template
+    debug_info = {}
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        debug_info["POST_action"] = action
+        debug_info["POST_selected_users"] = request.POST.getlist("selected_users")
+        debug_info["POST_bulk_role"] = request.POST.get("bulk_role")
+        debug_info["POST_bulk_dept"] = request.POST.get("bulk_dept")
+
+        print("⚙️ DEBUG POST:", dict(request.POST))
+        print("⚙️ Selected Users:", request.POST.getlist("selected_users"))
+        print("⚙️ Action:", action)
+        print("⚙️ Bulk Role:", request.POST.get("bulk_role"))
+        print("⚙️ Bulk Dept:", request.POST.get("bulk_dept"))
+
+        # ✅ Add new user
+        if action == "add_user":
+            username = request.POST.get("username")
+            email = request.POST.get("email")
+            password = request.POST.get("password")
+            role_id = request.POST.get("role_id")
+            dept_id = request.POST.get("dept_id")
+
+            if not username or not password:
+                messages.error(request, "Username and password are required.")
+                return redirect("admin_manage_users")
+
+            if User.objects.filter(username=username).exists():
+                messages.warning(request, f"User '{username}' already exists.")
+                return redirect("admin_manage_users")
+
+            user = User.objects.create_user(username=username, email=email, password=password)
+            profile = UserProfile.objects.get(user=user)
+            if role_id:
+                profile.role = Role.objects.get(id=role_id)
+            if dept_id:
+                profile.department = Department.objects.get(id=dept_id)
+            profile.save()
+            messages.success(request, f"User '{username}' added successfully.")
+            return redirect("admin_manage_users")
+
+        # ✅ Individual update
+        if action == "update_user":
+            user_id = request.POST.get("user_id")
+            role_id = request.POST.get("role_id")
+            dept_id = request.POST.get("dept_id")
+            try:
+                profile = UserProfile.objects.get(id=user_id)
+                if role_id:
+                    profile.role = Role.objects.get(id=role_id)
+                if dept_id:
+                    profile.department = Department.objects.get(id=dept_id)
+                profile.save()
+                messages.success(request, f"Updated user '{profile.user.username}'.")
+            except Exception as e:
+                messages.error(request, f"Error updating user: {e}")
+            return redirect("admin_manage_users")
+
+        # ✅ Bulk update (with debug)
+        if action == "bulk_update":
+            selected_ids = request.POST.getlist("selected_users")
+            role_id = request.POST.get("bulk_role")
+            dept_id = request.POST.get("bulk_dept")
+
+            print("⚙️ Processing bulk update — Selected:", selected_ids)
+
+            if not selected_ids:
+                messages.warning(request, "No users selected for bulk update.")
+                return redirect("admin_manage_users")
+
+            count = 0
+            for uid in selected_ids:
+                try:
+                    profile = UserProfile.objects.get(id=uid)
+                    if role_id:
+                        profile.role = Role.objects.get(id=role_id)
+                    if dept_id:
+                        profile.department = Department.objects.get(id=dept_id)
+                    profile.save()
+                    count += 1
+                    print(f"✅ Updated user ID {uid}")
+                except Exception as e:
+                    print(f"❌ Error updating {uid}: {e}")
+                    messages.error(request, f"Error updating user ID {uid}: {e}")
+
+            messages.success(request, f"Bulk updated {count} users successfully.")
+            return redirect("admin_manage_users")
+
+    context = {
+        "roles": roles,
+        "departments": departments,
+        "users": users,
+        "debug_info": debug_info,  # pass debug info to template
+    }
+    return render(request, "dashboard/admin_manage_users.html", context)

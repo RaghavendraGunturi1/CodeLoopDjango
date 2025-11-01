@@ -1,0 +1,230 @@
+{% extends "codingapp/base.html" %}
+{% load static %}
+{% block content %}
+
+{% if debug_info %}
+  <div class="alert alert-secondary">
+    <h6>🧩 Debug Info</h6>
+    <pre>{{ debug_info }}</pre>
+  </div>
+{% endif %}
+
+<div class="container mt-5">
+  <h2 class="mb-4 text-center">👥 Manage Users</h2>
+
+  {% for message in messages %}
+    <div class="alert alert-info">{{ message }}</div>
+  {% endfor %}
+
+  <!-- Add New User -->
+  <div class="card mb-5 shadow-sm">
+    <div class="card-header bg-success text-white">
+      <h5 class="mb-0">➕ Add New User</h5>
+    </div>
+    <div class="card-body">
+      <form method="POST">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_user">
+        <div class="row mb-3">
+          <div class="col-md-3">
+            <label class="form-label">Username</label>
+            <input type="text" name="username" class="form-control" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Email</label>
+            <input type="email" name="email" class="form-control">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Password</label>
+            <input type="password" name="password" class="form-control" required>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Role</label>
+            <select name="role_id" class="form-select">
+              <option value="">—</option>
+              {% for role in roles %}
+                <option value="{{ role.id }}">{{ role.name|title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Department</label>
+            <select name="dept_id" class="form-select">
+              <option value="">—</option>
+              {% for dept in departments %}
+                <option value="{{ dept.id }}">{{ dept.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-success">Add User</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Existing Users -->
+  <div class="card shadow-sm">
+    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">📋 All Users</h5>
+    </div>
+    <div class="card-body">
+
+      <!-- Bulk Action Toolbar + User Table -->
+      <form method="POST" id="bulkForm">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="bulk_update">
+
+        <!-- Bulk Controls -->
+        <div class="row align-items-end mb-3">
+          <div class="col-md-4">
+            <label class="form-label">Change Role For Selected:</label>
+            <select name="bulk_role" class="form-select">
+              <option value="">— No Change —</option>
+              {% for role in roles %}
+                <option value="{{ role.id }}">{{ role.name|title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Change Department For Selected:</label>
+            <select name="bulk_dept" class="form-select">
+              <option value="">— No Change —</option>
+              {% for dept in departments %}
+                <option value="{{ dept.id }}">{{ dept.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <button type="submit" class="btn btn-warning w-100">Apply Bulk Update</button>
+          </div>
+        </div>
+
+        <hr>
+
+        <!-- User Table -->
+        <table class="table table-striped align-middle mt-3">
+          <thead class="table-light">
+            <tr>
+              <th><input type="checkbox" id="select-all"></th>
+              <th>Username</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Department</th>
+              <th>Individual Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in users %}
+            <tr>
+              <td><input type="checkbox" name="selected_users" value="{{ u.id }}" class="user-checkbox"></td>
+              <td>{{ u.user.username }}</td>
+              <td>{{ u.user.email }}</td>
+              <td>{{ u.role.name|title }}</td>
+              <td>{{ u.department.name|default:"—" }}</td>
+              <td>
+                <div class="d-flex align-items-center gap-2">
+                  <select id="role-select-{{ u.id }}" class="form-select form-select-sm" style="width:140px;">
+                    {% for role in roles %}
+                      <option value="{{ role.id }}" {% if u.role == role %}selected{% endif %}>{{ role.name|title }}</option>
+                    {% endfor %}
+                  </select>
+                  <select id="dept-select-{{ u.id }}" class="form-select form-select-sm" style="width:140px;">
+                    <option value="">—</option>
+                    {% for dept in departments %}
+                      <option value="{{ dept.id }}" {% if u.department == dept %}selected{% endif %}>{{ dept.name }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="button" class="btn btn-sm btn-outline-primary" onclick="submitIndividualUpdate({{ u.id }})">Update</button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SCRIPTS ================= -->
+<script>
+// ---- CSRF Helper ----
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+const csrftoken = getCookie('csrftoken');
+
+// ---- Shift-Click Selection ----
+document.addEventListener("DOMContentLoaded", function() {
+  const checkboxes = document.querySelectorAll('.user-checkbox');
+  const selectAll = document.getElementById('select-all');
+  let lastChecked = null;
+
+  // Shift-click range select
+  checkboxes.forEach((checkbox) => {
+    checkbox.addEventListener('click', (e) => {
+      if (e.shiftKey && lastChecked) {
+        let inBetween = false;
+        checkboxes.forEach((cb) => {
+          if (cb === checkbox || cb === lastChecked) {
+            inBetween = !inBetween;
+          }
+          if (inBetween) cb.checked = lastChecked.checked;
+        });
+      }
+      lastChecked = checkbox;
+      // highlight row
+      const row = checkbox.closest('tr');
+      if (row) row.classList.toggle('table-active', checkbox.checked);
+    });
+  });
+
+  // "Select All"
+  selectAll.addEventListener('click', function() {
+    checkboxes.forEach(cb => {
+      cb.checked = this.checked;
+      const row = cb.closest('tr');
+      if (row) row.classList.toggle('table-active', cb.checked);
+    });
+  });
+});
+
+// ---- Individual Update via AJAX ----
+function submitIndividualUpdate(userId) {
+  const roleSelect = document.getElementById(`role-select-${userId}`);
+  const deptSelect = document.getElementById(`dept-select-${userId}`);
+  const roleId = roleSelect ? roleSelect.value : "";
+  const deptId = deptSelect ? deptSelect.value : "";
+
+  const data = new URLSearchParams();
+  data.append('action', 'update_user');
+  data.append('user_id', userId);
+  if (roleId) data.append('role_id', roleId);
+  if (deptId) data.append('dept_id', deptId);
+
+  fetch(window.location.pathname, {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': csrftoken,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: data.toString()
+  })
+  .then(resp => {
+    if (resp.redirected) {
+      window.location.href = resp.url;
+    } else {
+      return resp.text().then(() => window.location.reload());
+    }
+  })
+  .catch(err => {
+    console.error("Update failed:", err);
+    alert("Update failed — see console for details.");
+  });
+}
+</script>
+
+{% endblock %}
