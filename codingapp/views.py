@@ -2154,48 +2154,78 @@ from codingapp.permissions import can_assign
 
 @login_required
 def permissions_manage(request):
-    """Admin dashboard page to view and assign permissions."""
-    profile = request.user.userprofile
+    """Admin dashboard page to view and assign permissions (role + custom combined)."""
+    from codingapp.models import Role, ActionPermission, UserProfile
+
+    profile = getattr(request.user, "userprofile", None)
     if not profile or not profile.role or profile.role.name.lower() != "admin":
         messages.error(request, "You don't have access to this page.")
-        return redirect("dashboard")  # redirect non-admins
+        return redirect("dashboard")
 
     permissions = ActionPermission.objects.all().order_by("code")
-    roles = Role.objects.all().order_by("name")
-    users = UserProfile.objects.select_related("role", "user").order_by("user__username")
+    roles = Role.objects.prefetch_related("permissions").order_by("name")
+    users = UserProfile.objects.select_related("role", "user").prefetch_related("custom_permissions", "role__permissions").order_by("user__username")
 
+    # ✅ Combine role permissions + user custom permissions
+    combined_permission_map = {}
+    for user in users:
+        role_perms = set(user.role.permissions.values_list("id", flat=True)) if user.role else set()
+        custom_perms = set(user.custom_permissions.values_list("id", flat=True))
+        combined_permission_map[user.id] = role_perms.union(custom_perms)
+
+    # ✅ Handle POST actions
     if request.method == "POST":
-        # Assign permission to role
         role_id = request.POST.get("role_id")
-        perm_id = request.POST.get("perm_id")
         user_id = request.POST.get("user_id")
-        action = request.POST.get("action")  # add or remove
+        perm_id = request.POST.get("perm_id")
+        action = request.POST.get("action")
 
-        if role_id and perm_id:
-            role = Role.objects.get(id=role_id)
+        try:
             perm = ActionPermission.objects.get(id=perm_id)
-            if action == "add":
-                role.permissions.add(perm)
-            else:
-                role.permissions.remove(perm)
-            messages.success(request, f"Permission '{perm.name}' updated for role '{role.name}'.")
+        except ActionPermission.DoesNotExist:
+            messages.error(request, "Invalid permission.")
             return redirect("permissions_manage")
 
-        if user_id and perm_id:
-            user_profile = UserProfile.objects.get(id=user_id)
-            perm = ActionPermission.objects.get(id=perm_id)
-            if action == "add":
-                user_profile.custom_permissions.add(perm)
-            else:
-                user_profile.custom_permissions.remove(perm)
-            messages.success(request, f"Permission '{perm.name}' updated for user '{user_profile.user.username}'.")
+        # --- Role permissions ---
+        if role_id:
+            try:
+                role = Role.objects.get(id=role_id)
+                if action == "add":
+                    role.permissions.add(perm)
+                    messages.success(request, f"✅ Added '{perm.name}' to role '{role.name}'.")
+                else:
+                    role.permissions.remove(perm)
+                    messages.warning(request, f"🚫 Removed '{perm.name}' from role '{role.name}'.")
+            except Role.DoesNotExist:
+                messages.error(request, "Role not found.")
             return redirect("permissions_manage")
+
+        # --- User-specific (custom) permissions ---
+        if user_id:
+            try:
+                user_profile = UserProfile.objects.get(id=user_id)
+                if action == "add":
+                    user_profile.custom_permissions.add(perm)
+                    messages.success(request, f"✅ Added '{perm.name}' to user '{user_profile.user.username}'.")
+                else:
+                    user_profile.custom_permissions.remove(perm)
+                    messages.warning(request, f"🚫 Removed '{perm.name}' from user '{user_profile.user.username}'.")
+            except UserProfile.DoesNotExist:
+                messages.error(request, "User not found.")
+            return redirect("permissions_manage")
+
+    # ✅ Maps for templates
+    role_permission_map = {r.id: set(r.permissions.values_list("id", flat=True)) for r in roles}
+    user_permission_map = combined_permission_map  # includes role + custom
 
     context = {
         "permissions": permissions,
         "roles": roles,
         "users": users,
+        "role_permission_map": role_permission_map,
+        "user_permission_map": user_permission_map,
     }
+
     return render(request, "dashboard/permissions_manage.html", context)
 
 # ==============================================================

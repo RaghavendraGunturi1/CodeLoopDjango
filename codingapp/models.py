@@ -1,20 +1,19 @@
-from django.db import models
-from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
-from django.utils.text import slugify
-from django.utils import timezone
-
-# ==============================================================
-# 🧱 RBAC MODELS (Role, Permission, Department) — STEP 1
-# ==============================================================
+# codingapp/models.py
 from django.conf import settings
-from django.db import models
 from django.contrib.auth import get_user_model
-from django.dispatch import receiver
+from django.core.exceptions import ValidationError
+from django.db import models
+from django.db.utils import OperationalError, ProgrammingError
 from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.utils import timezone
+from django.utils.text import slugify
 
 User = get_user_model()
 
+# -----------------------------
+# RBAC models
+# -----------------------------
 class ActionPermission(models.Model):
     code = models.CharField(max_length=100, unique=True)
     name = models.CharField(max_length=150)
@@ -62,7 +61,9 @@ class Department(models.Model):
         return self.name
 
 
-# ---- Helper for test case structure ----
+# -----------------------------
+# Helpers and validation
+# -----------------------------
 def validate_test_cases(value):
     if not isinstance(value, list):
         raise ValidationError("Test cases must be a list.")
@@ -76,20 +77,23 @@ def validate_test_cases(value):
         if not all(isinstance(line, str) for line in test["expected_output"]):
             raise ValidationError("All elements in 'expected_output' must be strings.")
 
-# ---- Group model ----
+
+# -----------------------------
+# Domain models
+# -----------------------------
 class Group(models.Model):
     name = models.CharField(max_length=100, unique=True)
-    students = models.ManyToManyField(User, related_name='custom_groups')
+    students = models.ManyToManyField(User, related_name='custom_groups', blank=True)
 
     def __str__(self):
         return self.name
 
-# ---- Module model ----
+
 class Module(models.Model):
     title = models.CharField(max_length=255, unique=True)
     slug = models.SlugField(unique=True, blank=True)
     description = models.TextField(blank=True, null=True)
-    groups = models.ManyToManyField(Group, related_name='modules', blank=True)  # Only here!
+    groups = models.ManyToManyField(Group, related_name='modules', blank=True)
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -102,7 +106,7 @@ class Module(models.Model):
     class Meta:
         ordering = ['title']
 
-# ---- Question model ----
+
 class Question(models.Model):
     QUESTION_TYPES = [
         ('coding', 'Coding Problem'),
@@ -119,7 +123,7 @@ class Question(models.Model):
     test_cases = models.JSONField(
         default=list,
         validators=[validate_test_cases],
-        help_text="List of dicts with 'input' (string) and 'expected_output' (list of strings). Example: [{'input': '2', 'expected_output': ['2 2 2', '2 1 2', '2 2 2']}]"
+        help_text="List of dicts with 'input' and 'expected_output' keys."
     )
 
     def __str__(self):
@@ -128,11 +132,11 @@ class Question(models.Model):
     class Meta:
         unique_together = ['module', 'title']
 
-# ---- Language Choices ----
+
 SUPPORTED_LANGUAGES = ["python", "c", "cpp", "java", "javascript"]
 LANGUAGE_CHOICES = [(lang, lang.capitalize()) for lang in SUPPORTED_LANGUAGES]
 
-# ---- Submission model (Practice Section) ----
+
 class Submission(models.Model):
     class Status(models.TextChoices):
         PENDING = "Pending", "Pending"
@@ -154,10 +158,10 @@ class Submission(models.Model):
     class Meta:
         ordering = ['-submitted_at']
 
-# -----------------------------
-# 🔥 Assessment Feature Models
-# -----------------------------
 
+# -----------------------------
+# Assessment models
+# -----------------------------
 class Assessment(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
@@ -165,7 +169,7 @@ class Assessment(models.Model):
     duration_minutes = models.PositiveIntegerField(help_text="Duration in minutes")
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()
-    groups = models.ManyToManyField(Group, related_name='assessments', blank=True)  # Only here!
+    groups = models.ManyToManyField(Group, related_name='assessments', blank=True)
 
     def __str__(self):
         return self.title
@@ -173,6 +177,7 @@ class Assessment(models.Model):
     def is_active(self):
         now = timezone.now()
         return self.start_time <= now <= self.end_time
+
 
 class AssessmentQuestion(models.Model):
     assessment = models.ForeignKey(Assessment, on_delete=models.CASCADE)
@@ -184,6 +189,7 @@ class AssessmentQuestion(models.Model):
 
     def __str__(self):
         return f"{self.assessment.title} - {self.question.title}"
+
 
 class AssessmentSubmission(models.Model):
     assessment = models.ForeignKey(Assessment, on_delete=models.CASCADE)
@@ -202,27 +208,32 @@ class AssessmentSubmission(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.assessment.title} - {self.question.title}"
 
+
 class AssessmentSession(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     assessment = models.ForeignKey(Assessment, on_delete=models.CASCADE)
     start_time = models.DateTimeField(null=True, blank=True)
-    end_time = models.DateTimeField(null=True, blank=True)  # <-- ADD THIS LINE
+    end_time = models.DateTimeField(null=True, blank=True)
     quiz_submitted = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ['user', 'assessment']
 
+
+# -----------------------------
+# User profile and RBAC fields
+# -----------------------------
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     profile_picture = models.ImageField(
-        upload_to='profiles/', 
-        blank=True, 
+        upload_to='profiles/',
+        blank=True,
         null=True,
-        default='profiles/default_profile.png' 
+        default='profiles/default_profile.png'
     )
     full_name = models.CharField(max_length=100, blank=True)
 
-    # 🧩 New RBAC fields
+    # RBAC
     role = models.ForeignKey('Role', on_delete=models.SET_NULL, null=True, blank=True)
     department = models.ForeignKey('Department', on_delete=models.SET_NULL, null=True, blank=True)
     custom_permissions = models.ManyToManyField('ActionPermission', blank=True, related_name='users_with_custom_permissions')
@@ -230,7 +241,7 @@ class UserProfile(models.Model):
     def __str__(self):
         return self.full_name or self.user.username
 
-    # 🧠 Helper methods for permission aggregation
+    # Helper methods for permission aggregation
     def get_role_permissions(self):
         if self.role:
             return set(self.role.permissions.all())
@@ -240,21 +251,23 @@ class UserProfile(models.Model):
         return set(self.custom_permissions.all())
 
     def get_all_permissions(self):
-        # Union of role + user specific permissions
-        return {p.code for p in self.get_role_permissions() | self.get_user_permissions()}
- 
-from django.db import models
-from django.contrib.auth.models import User
+        # Return set of permission codes (role + custom)
+        return {p.code for p in (self.get_role_permissions() | self.get_user_permissions())}
 
+
+# -----------------------------
+# Quiz models
+# -----------------------------
 class Quiz(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
-    questions = models.ManyToManyField('Question', limit_choices_to={'question_type': 'mcq'})
+    questions = models.ManyToManyField('Question', limit_choices_to={'question_type': 'mcq'}, blank=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.title
+
 
 class QuizSubmission(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -265,6 +278,7 @@ class QuizSubmission(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.quiz.title} - {self.score}"
 
+
 class QuizAnswer(models.Model):
     submission = models.ForeignKey(QuizSubmission, on_delete=models.CASCADE, related_name='answers')
     question = models.ForeignKey(Question, on_delete=models.CASCADE)
@@ -273,7 +287,10 @@ class QuizAnswer(models.Model):
     def __str__(self):
         return f"{self.submission.user.username} - {self.question.title}"
 
-from codingapp.models import Group  
+
+# -----------------------------
+# Notes, Notices, Courses
+# -----------------------------
 class Note(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
@@ -282,8 +299,6 @@ class Note(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
     group = models.ForeignKey(Group, on_delete=models.SET_NULL, null=True, blank=True)
 
-from django.db import models
-from django.contrib.auth.models import User
 
 class Notice(models.Model):
     title = models.CharField(max_length=200)
@@ -297,6 +312,7 @@ class Notice(models.Model):
     def __str__(self):
         return self.title
 
+
 class NoticeReadStatus(models.Model):
     notice = models.ForeignKey(Notice, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -306,9 +322,6 @@ class NoticeReadStatus(models.Model):
     class Meta:
         unique_together = ('notice', 'user')
 
-
-from django.db import models
-from django.contrib.auth.models import User
 
 class Course(models.Model):
     DIFFICULTY_CHOICES = [
@@ -330,6 +343,7 @@ class Course(models.Model):
     def __str__(self):
         return self.title
 
+
 class CourseContent(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="contents")
     title = models.CharField(max_length=255)
@@ -343,8 +357,10 @@ class CourseContent(models.Model):
     def __str__(self):
         return f"{self.course.title} - {self.title}"
 
-# models.py
 
+# -----------------------------
+# Student performance & module completion
+# -----------------------------
 class StudentPerformance(models.Model):
     student = models.ForeignKey(User, on_delete=models.CASCADE)
     assessment = models.ForeignKey(Assessment, on_delete=models.CASCADE, null=True, blank=True)
@@ -365,55 +381,33 @@ class ModuleCompletion(models.Model):
     class Meta:
         unique_together = ('user', 'module')
 
-# in models.py
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-from django.contrib.auth.models import User
 
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-from django.contrib.auth.models import User
-
+# -----------------------------
+# Signals
+# -----------------------------
 @receiver(post_save, sender=User)
 def create_profile(sender, instance, created, **kwargs):
     if created:
         profile, created_flag = UserProfile.objects.get_or_create(user=instance)
-        
-        # FIX: Explicitly set the default filename if the profile was just created
         if created_flag:
-            # We set the name of the file expected to be in the /media/profiles/ directory.
-            profile.profile_picture = 'default_profile.png' 
+            # ensure a default profile picture path is present
+            profile.profile_picture = profile.profile_picture or 'profiles/default_profile.png'
             profile.save()
 
 
-from django.db.utils import OperationalError, ProgrammingError
-
-def ensure_default_permissions():
-    """Ensure all default permissions exist in the DB."""
-    try:
-        for code, name, desc in DEFAULT_PERMISSIONS:
-            perm, created = ActionPermission.objects.get_or_create(
-                code=code,
-                defaults={"name": name, "description": desc},
-            )
-            if created:
-                print(f"✅ Created permission: {code}")
-    except (OperationalError, ProgrammingError):
-        # Database not ready (e.g., during migrate)
-        pass
-
-
-# ===========================================================
-# 🧩 Default Permission Registry (System-wide)
-# ===========================================================
+# -----------------------------
+# Permission registry & defaults
+# -----------------------------
+# Base/default permissions (merged from previous list + view-derived perms)
 DEFAULT_PERMISSIONS = [
-    # --- System / General ---
+    # System / General
     ("view_dashboard", "View Dashboard", "Access the main dashboard"),
     ("view_profile", "View Profile", "View own profile and info"),
     ("edit_profile", "Edit Profile", "Update profile details"),
     ("change_password", "Change Password", "Change user password"),
+    ("view_leaderboard", "View Leaderboard", "Access leaderboard"),
 
-    # --- User & Role Management ---
+    # User & Role Management
     ("manage_users", "Manage Users", "Create, update, or deactivate users"),
     ("bulk_edit_users", "Bulk Edit Users", "Edit multiple users at once"),
     ("assign_roles", "Assign Roles", "Assign roles to users"),
@@ -423,15 +417,48 @@ DEFAULT_PERMISSIONS = [
     ("manage_departments", "Manage Departments", "Create/edit departments"),
     ("assign_hod", "Assign HODs", "Assign Head of Department"),
     ("manage_roles_permissions", "Manage Roles & Permissions", "Manage role-based permissions"),
+    ("manage_permissions", "Manage Permissions", "Manage permission mappings"),
 
-    # --- Department / HOD Controls ---
+    # Department / HOD Controls
     ("view_department", "View Department", "Access department dashboard"),
     ("manage_teachers", "Manage Teachers", "Edit or remove teachers"),
     ("manage_students", "Manage Students", "Edit or remove students"),
     ("view_hod_dashboard", "View HOD Dashboard", "Access the HOD dashboard"),
     ("hod_assign_permissions", "HOD Assign Permissions", "Allow HODs to grant permissions"),
+    ("assign_teacher", "Assign Teachers", "Assign teachers to classes or courses"),
+    ("assign_student", "Assign Students", "Assign students to classes or courses"),
 
-    # --- Quiz / Assessment ---
+    # Modules
+    ("view_modules", "View Modules", "View list of modules"),
+    ("view_module_detail", "View Module Details", "Open module detail"),
+    ("add_module", "Add Module", "Create a new module"),
+    ("edit_module", "Edit Module", "Edit existing module"),
+    ("delete_module", "Delete Module", "Remove a module"),
+    ("mark_module_completed", "Mark Module Completed", "Mark module as completed for a user"),
+    ("add_question_to_module", "Add Question to Module", "Attach question to module"),
+
+    # Questions
+    ("view_questions", "View Questions", "View list of questions"),
+    ("view_question_detail", "View Question Details", "View question detail"),
+    ("add_question", "Add Question", "Create question"),
+    ("edit_question", "Edit Question", "Edit question"),
+    ("delete_question", "Delete Question", "Delete question"),
+    ("execute_code", "Execute Code", "Run code in sandbox"),
+    ("teacher_bulk_upload_mcq", "Bulk Upload MCQ (Teacher)", "Teacher MCQ bulk upload"),
+    ("bulk_mcq_upload", "Bulk Upload MCQ (Admin)", "Admin MCQ bulk upload"),
+
+    # Assessments & Quizzes
+    ("view_assessments", "View Assessments", "View assessments list"),
+    ("view_assessment_detail", "View Assessment Detail", "View assessment details"),
+    ("attempt_assessment_quiz", "Attempt Assessment Quiz", "Student attempt assessment quiz"),
+    ("attempt_assessment_code", "Attempt Assessment Code", "Student attempt coding assessment"),
+    ("view_assessment_leaderboard", "View Assessment Leaderboard", "View assessment leaderboard"),
+    ("export_assessment_leaderboard", "Export Assessment Leaderboard", "Export leaderboard"),
+    ("reset_assessment_submissions", "Reset Assessment Submissions", "Reset submissions for assessment"),
+    ("assessment_result", "View Assessment Result", "View individual assessment result"),
+    ("take_quiz", "Take Quiz", "Student take quiz"),
+    ("view_quiz_result", "View Quiz Result", "View quiz result"),
+    ("view_quiz_leaderboard", "View Quiz Leaderboard", "View quiz leaderboard"),
     ("create_quiz", "Create Quiz", "Create new quizzes"),
     ("edit_quiz", "Edit Quiz", "Modify existing quizzes"),
     ("delete_quiz", "Delete Quiz", "Delete quizzes"),
@@ -442,67 +469,127 @@ DEFAULT_PERMISSIONS = [
     ("view_results", "View Results", "View quiz results"),
     ("reset_quiz_attempt", "Reset Quiz Attempt", "Reset quiz submissions"),
 
-    # --- Notes / Materials ---
+    # Notes / Materials
     ("upload_notes", "Upload Notes", "Upload study materials"),
     ("edit_notes", "Edit Notes", "Modify uploaded notes"),
     ("delete_notes", "Delete Notes", "Remove notes"),
     ("view_notes", "View Notes", "Access uploaded notes"),
     ("share_notes", "Share Notes", "Share notes with others"),
-
-    # --- Student Permissions ---
-    ("view_assigned_quizzes", "View Assigned Quizzes", "View quizzes assigned to student"),
-    ("attempt_quiz", "Attempt Quiz", "Take assigned quizzes"),
-    ("view_own_results", "View Own Results", "View personal quiz scores"),
     ("view_uploaded_notes", "View Uploaded Notes", "View available notes"),
-    ("post_feedback", "Post Feedback", "Submit feedback or questions"),
-    ("view_announcements", "View Announcements", "View teacher/HOD announcements"),
 
-    # --- Admin / System ---
-    ("access_admin_panel", "Access Admin Panel", "Access the main Admin Control Center"),
+    # Notices / Announcements
+    ("view_notices", "View Announcements", "View announcements"),
+    ("add_notice", "Add Announcement", "Create an announcement"),
+    ("edit_notice", "Edit Announcement", "Edit announcement"),
+    ("delete_notice", "Delete Announcement", "Delete announcement"),
+    ("view_announcements", "View Announcements (alias)", "View announcements"),  # alias / compatibility
+
+    # Courses & Content
+    ("create_course", "Create Course", "Create courses"),
+    ("edit_course", "Edit Course", "Edit courses"),
+    ("delete_course", "Delete Course", "Delete courses"),
+    ("manage_courses", "Manage Courses", "Course management"),
+    ("view_course_content", "View Course Content", "View content"),
+    ("manage_course_content", "Manage Course Content", "Manage content"),
+
+    # Teacher-specific
+    ("teacher_dashboard", "Access Teacher Dashboard", "Teacher dashboard"),
+    ("teacher_manage_modules", "Manage Modules (Teacher)", "Teacher module management"),
+    ("teacher_manage_questions", "Manage Questions (Teacher)", "Teacher question management"),
+    ("teacher_manage_assessments", "Manage Assessments (Teacher)", "Teacher assessment management"),
+    ("teacher_manage_groups", "Manage Groups (Teacher)", "Teacher group management"),
+    ("teacher_manage_quizzes", "Manage Quizzes (Teacher)", "Teacher quiz management"),
+    ("teacher_manage_courses", "Manage Courses (Teacher)", "Teacher course management"),
+
+    # Analytics / Performance
+    ("view_student_performance", "View Student Performance", "View student analytics"),
+    ("view_student_detail", "View Student Detail", "View student details"),
+    ("export_student_performance", "Export Student Performance", "Export performance data"),
+
+    # System / Admin
+    ("access_admin_panel", "Access Admin Panel", "Access the Admin Control Center"),
     ("system_configuration", "System Configuration", "Change platform settings"),
-    ("manage_permissions", "Manage Permissions", "Manage permission mappings"),
+    ("system_settings", "System Settings", "Edit system settings"),
     ("view_audit_logs", "View Audit Logs", "View recent user actions"),
-    ("backup_database", "Backup Database", "Export backups"),
-    ("restore_database", "Restore Database", "Restore system backups"),
+    ("backup_database", "Backup Database", "Create database backups"),
+    ("restore_database", "Restore Database", "Restore database backups"),
     ("delete_anything", "Delete Any Object", "Delete any record (superuser only)"),
+
+    # Misc / API-like
+    ("run_code", "Run Code API", "Run code in sandbox"),
+    ("clear_splash_flag", "Clear Splash Flag", "Clear splash screen"),
+    ("check_submission_status", "Check Submission Status", "Check submission status endpoint"),
 ]
 
-# ===========================================================
-# 🧠 DEFAULT PERMISSIONS FOR EACH ROLE
-# ===========================================================
 
+def ensure_default_permissions():
+    """Ensure all default permissions exist in the DB."""
+    try:
+        for code, name, desc in DEFAULT_PERMISSIONS:
+            ActionPermission.objects.get_or_create(
+                code=code,
+                defaults={"name": name, "description": desc},
+            )
+    except (OperationalError, ProgrammingError):
+        # Database not ready (e.g., during migrate)
+        pass
+
+
+# ===========================================================
+# Default role permission mapping
+# ===========================================================
 ROLE_DEFAULT_PERMISSIONS = {
-    "admin": [  # full system control
-        "*",  # wildcard: all permissions
+    "admin": ["*"],
+
+    "hod": [
+        # General
+        "view_dashboard", "view_profile", "edit_profile", "view_leaderboard", "view_notices", "view_announcements",
+        "add_notice", "edit_notice", "delete_notice",
+
+        # Users / Departments / Roles
+        "manage_departments", "manage_teachers", "manage_students", "manage_users", "bulk_edit_users",
+        "assign_roles", "assign_hod", "manage_roles_permissions", "manage_permissions", "hod_assign_permissions",
+
+        # Modules & Questions
+        "view_modules", "view_module_detail", "add_module", "edit_module", "delete_module",
+        "add_question_to_module", "view_questions", "add_question", "edit_question", "delete_question",
+
+        # Assessments & Quizzes
+        "view_assessments", "view_assessment_detail", "create_quiz", "edit_quiz", "delete_quiz", "view_quiz",
+        "assign_quiz", "grade_quiz", "view_results", "view_quiz_leaderboard", "reset_assessment_submissions",
+        "export_assessment_leaderboard", "assessment_result",
+
+        # Notes & Content
+        "upload_notes", "edit_notes", "delete_notes", "view_notes", "view_uploaded_notes",
+
+        # Analytics
+        "view_student_performance", "view_student_detail", "export_student_performance",
     ],
 
-    "hod": [  # department-level control
-        "view_dashboard", "view_profile", "edit_profile",
-        "manage_teachers", "manage_students", "view_department",
-        "assign_teacher", "assign_student",
-        "create_quiz", "edit_quiz", "delete_quiz", "view_quiz", "grade_quiz", "view_results",
+    "teacher": [
+        "view_dashboard", "view_profile", "edit_profile", "view_leaderboard", "view_notices",
+        # Modules / Questions
+        "view_modules", "view_module_detail", "add_module", "edit_module", "delete_module",
+        "view_questions", "add_question", "edit_question", "delete_question", "teacher_bulk_upload_mcq", "execute_code",
+        # Assessments / Quizzes
+        "teacher_manage_assessments", "teacher_manage_quizzes", "view_assessments", "view_assessment_detail",
+        "take_quiz", "view_quiz_result", "view_quiz_leaderboard", "assessment_result", "reset_assessment_submissions",
+        "view_results",
+        # Notes
         "upload_notes", "edit_notes", "delete_notes", "view_notes",
-        "hod_assign_permissions", "manage_roles_permissions",
-        "view_hod_dashboard",
-        "view_announcements", "post_feedback"
     ],
 
-    "teacher": [  # content and quiz management
+    "student": [
         "view_dashboard", "view_profile", "edit_profile",
-        "create_quiz", "edit_quiz", "view_quiz", "view_results",
-        "upload_notes", "edit_notes", "delete_notes", "view_notes",
-        "view_assigned_quizzes", "grade_quiz",
-        "view_announcements", "post_feedback"
-    ],
-
-    "student": [  # limited self access
-        "view_dashboard", "view_profile", "edit_profile",
-        "view_assigned_quizzes", "attempt_quiz", "view_own_results",
-        "view_uploaded_notes", "view_announcements", "post_feedback"
+        "view_modules", "view_module_detail",
+        "view_questions", "view_question_detail",
+        "execute_code",
+        "take_quiz", "attempt_assessment_quiz", "attempt_assessment_code",
+        "view_quiz_result", "view_assessment_leaderboard", "assessment_result",
+        "view_notes", "view_notices", "view_uploaded_notes", "post_feedback",
     ],
 }
 
-from django.db.utils import OperationalError, ProgrammingError
 
 def assign_default_permissions_to_roles():
     """
@@ -510,23 +597,20 @@ def assign_default_permissions_to_roles():
     Admin gets all permissions.
     """
     try:
-        from codingapp.models import Role, ActionPermission
-
+        all_codes = set(ActionPermission.objects.values_list("code", flat=True))
         for role_name, perm_codes in ROLE_DEFAULT_PERMISSIONS.items():
             role, _ = Role.objects.get_or_create(name=role_name)
-
             if "*" in perm_codes:
-                # Admin: all permissions
                 perms = ActionPermission.objects.all()
                 role.permissions.set(perms)
                 print(f"✅ Assigned ALL permissions to '{role_name}'")
             else:
+                missing = [c for c in perm_codes if c not in all_codes]
+                if missing:
+                    print(f"⚠️ Missing permutations for {role_name}: {missing}")
                 perms = ActionPermission.objects.filter(code__in=perm_codes)
                 role.permissions.set(perms)
                 print(f"✅ Assigned {perms.count()} permissions to '{role_name}'")
-
             role.save()
-
     except (OperationalError, ProgrammingError):
-        # skip if migrations not ready
         pass
