@@ -1,5 +1,6 @@
 {% extends "codingapp/base.html" %}
 {% load static %}
+{% load permission_tags %}
 {% block content %}
 
 <div class="container mt-5">
@@ -9,7 +10,14 @@
     <div class="alert alert-info">{{ message }}</div>
   {% endfor %}
 
-  <!-- HOD SECTION -->
+  <style>
+    .perm-btn { width: 100%; font-size: 0.9rem; }
+    .perm-assigned { background-color: #dc3545; color: white; }
+    .perm-unassigned { background-color: #198754; color: white; }
+    .perm-assigned:hover, .perm-unassigned:hover { opacity: 0.9; }
+  </style>
+
+  <!-- =============== HOD SECTION =============== -->
   <div class="card mb-4 shadow-sm">
     <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center"
          data-bs-toggle="collapse" data-bs-target="#hodSection" aria-expanded="true" style="cursor:pointer;">
@@ -39,11 +47,13 @@
                       {% csrf_token %}
                       <input type="hidden" name="user_id" value="{{ user.id }}">
                       <input type="hidden" name="perm_id" value="{{ perm.id }}">
-                      {% if perm in user.custom_permissions.all %}
-                        <button name="action" value="remove" class="btn btn-sm btn-danger">Revoke</button>
-                      {% else %}
-                        <button name="action" value="add" class="btn btn-sm btn-success">Grant</button>
-                      {% endif %}
+                      {% with user_permission_map|has_permission:user.id as permset %}
+                        {% if perm.id|in_set:permset %}
+                          <button name="action" value="remove" class="btn btn-sm perm-btn perm-assigned">Revoke</button>
+                        {% else %}
+                          <button name="action" value="add" class="btn btn-sm perm-btn perm-unassigned">Grant</button>
+                        {% endif %}
+                      {% endwith %}
                     </form>
                   </td>
                 </tr>
@@ -58,7 +68,7 @@
     </div>
   </div>
 
-  <!-- TEACHERS SECTION -->
+  <!-- =============== TEACHERS SECTION =============== -->
   <div class="card mb-4 shadow-sm">
     <div class="card-header bg-info text-dark d-flex justify-content-between align-items-center"
          data-bs-toggle="collapse" data-bs-target="#teacherSection" aria-expanded="false" style="cursor:pointer;">
@@ -88,11 +98,13 @@
                       {% csrf_token %}
                       <input type="hidden" name="user_id" value="{{ user.id }}">
                       <input type="hidden" name="perm_id" value="{{ perm.id }}">
-                      {% if perm in user.custom_permissions.all %}
-                        <button name="action" value="remove" class="btn btn-sm btn-danger">Revoke</button>
-                      {% else %}
-                        <button name="action" value="add" class="btn btn-sm btn-success">Grant</button>
-                      {% endif %}
+                      {% with user_permission_map|has_permission:user.id as permset %}
+                        {% if perm.id|in_set:permset %}
+                          <button name="action" value="remove" class="btn btn-sm perm-btn perm-assigned">Revoke</button>
+                        {% else %}
+                          <button name="action" value="add" class="btn btn-sm perm-btn perm-unassigned">Grant</button>
+                        {% endif %}
+                      {% endwith %}
                     </form>
                   </td>
                 </tr>
@@ -107,7 +119,7 @@
     </div>
   </div>
 
-  <!-- STUDENTS SECTION -->
+  <!-- =============== STUDENTS SECTION =============== -->
   <div class="card mb-4 shadow-sm">
     <div class="card-header bg-success text-white d-flex justify-content-between align-items-center"
          data-bs-toggle="collapse" data-bs-target="#studentSection" aria-expanded="false" style="cursor:pointer;">
@@ -137,11 +149,13 @@
                       {% csrf_token %}
                       <input type="hidden" name="user_id" value="{{ user.id }}">
                       <input type="hidden" name="perm_id" value="{{ perm.id }}">
-                      {% if perm in user.custom_permissions.all %}
-                        <button name="action" value="remove" class="btn btn-sm btn-danger">Revoke</button>
-                      {% else %}
-                        <button name="action" value="add" class="btn btn-sm btn-success">Grant</button>
-                      {% endif %}
+                      {% with user_permission_map|has_permission:user.id as permset %}
+                        {% if perm.id|in_set:permset %}
+                          <button name="action" value="remove" class="btn btn-sm perm-btn perm-assigned">Revoke</button>
+                        {% else %}
+                          <button name="action" value="add" class="btn btn-sm perm-btn perm-unassigned">Grant</button>
+                        {% endif %}
+                      {% endwith %}
                     </form>
                   </td>
                 </tr>
@@ -157,7 +171,7 @@
   </div>
 </div>
 
-<!-- Bootstrap Icons (optional for chevron arrows) -->
+<!-- Bootstrap Icons for chevrons -->
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
 
 {% endblock %}
