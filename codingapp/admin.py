@@ -143,11 +143,21 @@ class AssessmentQuestionAdmin(admin.ModelAdmin):
 from django.contrib import admin
 from .models import Group
 
-class GroupAdmin(admin.ModelAdmin):
-    list_display = ('name',)  # Add more fields if you want
-    filter_horizontal = ('students',)  # Makes the student selection easier
+from django.contrib import admin
+from .models import Group
 
-admin.site.register(Group, GroupAdmin)
+# Unregister if it was registered before
+try:
+    admin.site.unregister(Group)
+except admin.sites.NotRegistered:
+    pass
+
+@admin.register(Group)
+class GroupAdmin(admin.ModelAdmin):
+    list_display = ('name', 'department')
+    list_filter = ('department',)
+    search_fields = ('name', 'department__name')
+
 
 
 from django.contrib import admin

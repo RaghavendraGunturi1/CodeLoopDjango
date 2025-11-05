@@ -286,6 +286,7 @@ def question_list(request):
         qs = Question.objects.filter(module__in=modules).distinct()
     return render(request, 'codingapp/question_list.html', {'questions': qs})
 
+
 @login_required
 def question_detail(request, pk):
     q = get_object_or_404(Question, pk=pk)
@@ -2245,8 +2246,6 @@ def permissions_manage(request):
             | Q(role__name__icontains=search_query)
         )
 
-
-
     # Build fast lookup maps for template
     role_permission_map = {}
     custom_permission_map = {}
@@ -2749,3 +2748,106 @@ def admin_manage_departments(request):
         "hod_candidates": hod_candidates,
     }
     return render(request, "dashboard/admin_manage_departments.html", context)
+
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.shortcuts import render, redirect
+from codingapp.models import Group, Department, UserProfile
+
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.shortcuts import render, redirect
+from codingapp.models import Group, Department, UserProfile
+
+@login_required
+def manage_groups(request):
+    """Unified Manage Groups view (CRUD + Department filter + student assignment)."""
+
+    profile = getattr(request.user, "userprofile", None)
+    if not profile or not profile.role:
+        messages.error(request, "Access denied. Missing role information.")
+        return redirect("dashboard")
+
+    role_name = profile.role.name.lower()
+
+    # Permissions: only Admin, HOD, and Teacher can access
+    if role_name not in ["admin", "hod", "teacher"]:
+        messages.error(request, "Access denied.")
+        return redirect("dashboard")
+
+    # Determine department filter (HOD/Teacher limited to their dept)
+    if role_name == "admin":
+        departments = Department.objects.all().order_by("name")
+        groups = Group.objects.select_related("department").prefetch_related("students").order_by("department__name", "name")
+        students = UserProfile.objects.filter(role__name__iexact="student").select_related("user").order_by("user__username")
+    else:
+        departments = Department.objects.filter(id=profile.department_id)
+        groups = Group.objects.filter(department=profile.department).select_related("department").prefetch_related("students").order_by("name")
+        students = UserProfile.objects.filter(role__name__iexact="student", department=profile.department).select_related("user").order_by("user__username")
+
+    # ---------- Handle POST actions ----------
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        # ✅ Create or Edit Group
+        if action == "add_or_edit_group":
+            group_id = request.POST.get("group_id")
+            name = request.POST.get("name", "").strip()
+            dept_id = request.POST.get("department_id") or None
+            student_ids = request.POST.getlist("student_ids")
+
+            if not name:
+                messages.error(request, "Group name cannot be empty.")
+                return redirect("manage_groups")
+
+            department = None
+            if dept_id:
+                try:
+                    department = Department.objects.get(id=dept_id)
+                except Department.DoesNotExist:
+                    messages.error(request, "Invalid department selected.")
+                    return redirect("manage_groups")
+
+            if group_id:
+                # Edit existing
+                try:
+                    group = Group.objects.get(id=group_id)
+                    group.name = name
+                    group.department = department
+                    group.save()
+                    # Update students
+                    if student_ids:
+                        group.students.set([s.user for s in UserProfile.objects.filter(id__in=student_ids)])
+                    else:
+                        group.students.clear()
+                    messages.success(request, f"Updated group '{group.name}'.")
+                except Group.DoesNotExist:
+                    messages.error(request, "Group not found.")
+            else:
+                # Create new
+                group = Group.objects.create(name=name, department=department)
+                if student_ids:
+                    group.students.set([s.user for s in UserProfile.objects.filter(id__in=student_ids)])
+                messages.success(request, f"Group '{group.name}' created successfully.")
+
+            return redirect("manage_groups")
+
+        # ✅ Delete Group
+        elif action == "delete_group":
+            group_id = request.POST.get("group_id")
+            try:
+                group = Group.objects.get(id=group_id)
+                name = group.name
+                group.delete()
+                messages.success(request, f"Group '{name}' deleted successfully.")
+            except Group.DoesNotExist:
+                messages.error(request, "Group not found.")
+            return redirect("manage_groups")
+
+    # ---------- Context ----------
+    context = {
+        "groups": groups,
+        "departments": departments,
+        "students": students,
+    }
+    return render(request, "dashboard/manage_groups.html", context)
