@@ -63,6 +63,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'codingapp.context_processors.unread_notice_count',  # ✅ Add custom context processor
+                "codingapp.context_processors.current_user_permissions",
             ],
         },
     },

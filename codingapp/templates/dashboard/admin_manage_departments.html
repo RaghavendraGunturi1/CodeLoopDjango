@@ -1,0 +1,103 @@
+{% extends "codingapp/base.html" %}
+{% load static %}
+{% block content %}
+
+<div class="container mt-5">
+  <h2 class="mb-4 text-center">🏫 Manage Departments</h2>
+
+  {% for message in messages %}
+    <div class="alert alert-info">{{ message }}</div>
+  {% endfor %}
+
+  <!-- Add Department -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-success text-white">
+      <h5 class="mb-0">➕ Add New Department</h5>
+    </div>
+    <div class="card-body">
+      <form method="POST">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_department">
+        <div class="row mb-3">
+          <div class="col-md-4">
+            <label class="form-label">Department Name</label>
+            <input type="text" name="name" class="form-control" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Code</label>
+            <input type="text" name="code" class="form-control" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Assign HOD (optional)</label>
+            <select name="hod_id" class="form-select">
+              <option value="">— None —</option>
+              {% for hod in hod_candidates %}
+                <option value="{{ hod.id }}">{{ hod.user.username }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-success">Add Department</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Department List -->
+  <div class="card shadow-sm">
+    <div class="card-header bg-primary text-white">
+      <h5 class="mb-0">🏷 All Departments</h5>
+    </div>
+    <div class="card-body">
+      {% if departments %}
+        <table class="table table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Code</th>
+              <th>HOD</th>
+              <th>Teachers</th>
+              <th>Students</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for dept in departments %}
+              <tr>
+                <form method="POST">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="update_department">
+                  <input type="hidden" name="dept_id" value="{{ dept.id }}">
+                  <td><input type="text" name="name" class="form-control form-control-sm" value="{{ dept.name }}"></td>
+                  <td><input type="text" name="code" class="form-control form-control-sm" value="{{ dept.code }}"></td>
+                  <td>
+                    <select name="hod_id" class="form-select form-select-sm">
+                      <option value="">— None —</option>
+                      {% for hod in hod_candidates %}
+                        <option value="{{ hod.id }}" {% if dept.hod and dept.hod.id == hod.id %}selected{% endif %}>{{ hod.user.username }}</option>
+                      {% endfor %}
+                    </select>
+                  </td>
+                  <td>{{ dept.teacher_count }}</td>
+                  <td>{{ dept.student_count }}</td>
+                  <td>
+                    <button type="submit" class="btn btn-sm btn-outline-primary me-2">Save</button>
+                </form>
+                    <form method="POST" style="display:inline;" onsubmit="return confirm('Delete {{ dept.name }}?');">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="delete_department">
+                      <input type="hidden" name="dept_id" value="{{ dept.id }}">
+                      <button class="btn btn-sm btn-outline-danger">Delete</button>
+                    </form>
+                  </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="text-muted text-center">No departments found.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}

@@ -254,6 +254,24 @@ class UserProfile(models.Model):
         # Return set of permission codes (role + custom)
         return {p.code for p in (self.get_role_permissions() | self.get_user_permissions())}
 
+    def permission_codes(self):
+        """
+        Return a set of permission codes (strings) that this user effectively has:
+        union of role permissions and custom permissions.
+        """
+        # role permissions (codes)
+        role_codes = set()
+        if self.role:
+            role_codes = set(self.role.permissions.values_list("code", flat=True))
+        custom_codes = set(self.custom_permissions.values_list("code", flat=True))
+        return role_codes | custom_codes
+
+    def has_permission(self, code):
+        """
+        Convenience check whether user has the given permission code.
+        """
+        return code in self.permission_codes()
+
 
 # -----------------------------
 # Quiz models

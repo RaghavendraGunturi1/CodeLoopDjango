@@ -1118,52 +1118,112 @@ from django.contrib.auth.models import User
 from django.shortcuts import render, redirect
 from django.contrib import messages
 
+from django.shortcuts import render, redirect
+from django.contrib import messages
 from django.contrib.auth.models import User
-from .models import UserProfile, Group
 from django.contrib.auth.decorators import user_passes_test
 import openpyxl
+from .models import UserProfile, Role, Department, Group
 
-@user_passes_test(lambda u: u.is_staff)
+
+@user_passes_test(lambda u: hasattr(u, "userprofile") and u.userprofile.role and u.userprofile.role.name.lower() == "admin")
 def bulk_user_upload(request):
+    """
+    Allows admin to upload users in bulk from an Excel file (.xlsx or .xls).
+    Supports columns: username, full_name, email, password, role, department, group.
+    Department is optional.
+    """
     result = None
+
     if request.method == "POST" and request.FILES.get("excel_file"):
         excel_file = request.FILES["excel_file"]
-        wb = openpyxl.load_workbook(excel_file)
-        ws = wb.active
-        headers = [cell.value for cell in ws[1]]
-        expected_headers = ["username", "full_name", "email", "password", "group"]
-        if any(h not in headers for h in expected_headers):
-            result = {"created": 0, "skipped": 0, "errors": ["Invalid headers. Expected: " + ", ".join(expected_headers)]}
-        else:
-            created = skipped = 0
-            errors = []
-            for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-                row_data = dict(zip(headers, row))
-                username = str(row_data.get("username")).strip() if row_data.get("username") else None
-                full_name = row_data.get("full_name", "").strip()
-                email = row_data.get("email", "").strip()
-                password = row_data.get("password", "").strip()
-                group_name = row_data.get("group", "").strip()
-                if not username or not password or not email:
-                    errors.append(f"Row {i}: Missing username/password/email.")
+
+        try:
+            wb = openpyxl.load_workbook(excel_file)
+            ws = wb.active
+        except Exception as e:
+            messages.error(request, f"Error reading Excel file: {e}")
+            return redirect("admin_manage_users")
+
+        # Expected headers (now includes optional 'department')
+        headers = [str(cell.value).strip().lower() if cell.value else "" for cell in ws[1]]
+        expected_headers = ["username", "full_name", "email", "password", "role", "department", "group"]
+
+        # Validate headers (at least required ones)
+        required_headers = ["username", "email", "password", "role"]
+        if any(h not in headers for h in required_headers):
+            messages.error(
+                request,
+                f"Invalid headers. Required: {', '.join(required_headers)} | "
+                f"Optional: department, group"
+            )
+            return redirect("admin_manage_users")
+
+        created = skipped = 0
+        errors = []
+
+        # Get index mapping for flexible column order
+        col_index = {h: headers.index(h) for h in headers if h}
+
+        for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            try:
+                username = str(row[col_index.get("username")]).strip() if row[col_index.get("username")] else None
+                email = (row[col_index.get("email")] or "").strip()
+                password = (row[col_index.get("password")] or "").strip() or "password123"
+                full_name = (row[col_index.get("full_name")] or "").strip()
+                role_name = (row[col_index.get("role")] or "").strip()
+                dept_name = (row[col_index.get("department")] or "").strip() if "department" in col_index else ""
+                group_name = (row[col_index.get("group")] or "").strip() if "group" in col_index else ""
+
+                if not username or not email or not password:
+                    errors.append(f"Row {i}: Missing required fields.")
                     continue
+
                 if User.objects.filter(username=username).exists():
                     skipped += 1
                     continue
-                try:
-                    user = User.objects.create_user(username=username, email=email, password=password)
-                    user_profile, _ = UserProfile.objects.get_or_create(user=user)
-                    user_profile.full_name = full_name
-                    user_profile.save()
-                    # Group assignment
-                    if group_name:
-                        group, _ = Group.objects.get_or_create(name=group_name)
-                        group.students.add(user)
-                    created += 1
-                except Exception as e:
-                    errors.append(f"Row {i}: {e}")
-            result = {"created": created, "skipped": skipped, "errors": errors}
+
+                user = User.objects.create_user(username=username, email=email, password=password)
+                profile, _ = UserProfile.objects.get_or_create(user=user)
+                profile.full_name = full_name
+
+                # Assign role
+                if role_name:
+                    role = Role.objects.filter(name__iexact=role_name).first()
+                    if role:
+                        profile.role = role
+
+                # Assign department (optional)
+                if dept_name:
+                    dept = Department.objects.filter(name__iexact=dept_name).first()
+                    if dept:
+                        profile.department = dept
+
+                profile.save()
+
+                # Group assignment (optional)
+                if group_name:
+                    group, _ = Group.objects.get_or_create(name=group_name)
+                    group.students.add(user)
+
+                created += 1
+
+            except Exception as e:
+                errors.append(f"Row {i}: {e}")
+
+        result = {"created": created, "skipped": skipped, "errors": errors}
+
+        if created > 0:
+            messages.success(request, f"✅ {created} users added successfully. {skipped} skipped.")
+        if errors:
+            messages.warning(request, f"⚠️ Some rows failed: {len(errors)} issues.")
+            for err in errors[:5]:  # show only top 5 errors
+                messages.info(request, err)
+
+        return redirect("admin_manage_users")
+
     return render(request, "codingapp/bulk_user_upload.html", {"result": result})
+
 
 
 from django.contrib.auth.decorators import user_passes_test, login_required
@@ -2154,78 +2214,119 @@ from codingapp.permissions import can_assign
 
 @login_required
 def permissions_manage(request):
-    """Admin dashboard page to view and assign permissions (role + custom combined)."""
+    """
+    Admin dashboard page to view and assign permissions.
+    - Left: list of users
+    - Right: selected user's permissions (inherited role perms vs custom perms)
+    Supports bulk assignment of multiple custom permissions to a single user.
+    """
     from codingapp.models import Role, ActionPermission, UserProfile
+    import json
 
     profile = getattr(request.user, "userprofile", None)
     if not profile or not profile.role or profile.role.name.lower() != "admin":
         messages.error(request, "You don't have access to this page.")
         return redirect("dashboard")
 
+    # Load everything needed
     permissions = ActionPermission.objects.all().order_by("code")
     roles = Role.objects.prefetch_related("permissions").order_by("name")
-    users = UserProfile.objects.select_related("role", "user").prefetch_related("custom_permissions", "role__permissions").order_by("user__username")
+    users = (
+        UserProfile.objects.select_related("role", "user")
+        .prefetch_related("custom_permissions", "role__permissions")
+        .order_by("role__name", "user__username")   # ✅ Added sorting by role name first
+    )
+    search_query = request.GET.get("search", "").strip()
+    if search_query:
+        users = users.filter(
+            Q(user__username__icontains=search_query)
+            | Q(full_name__icontains=search_query)
+            | Q(user__email__icontains=search_query)
+            | Q(role__name__icontains=search_query)
+        )
 
-    # ✅ Combine role permissions + user custom permissions
+
+
+    # Build fast lookup maps for template
+    role_permission_map = {}
+    custom_permission_map = {}
     combined_permission_map = {}
-    for user in users:
-        role_perms = set(user.role.permissions.values_list("id", flat=True)) if user.role else set()
-        custom_perms = set(user.custom_permissions.values_list("id", flat=True))
-        combined_permission_map[user.id] = role_perms.union(custom_perms)
 
-    # ✅ Handle POST actions
+    for u in users:
+        role_perms = list(u.role.permissions.values_list("id", flat=True)) if u.role else []
+        custom_perms = list(u.custom_permissions.values_list("id", flat=True))
+        role_permission_map[u.id] = role_perms
+        custom_permission_map[u.id] = custom_perms
+        combined_permission_map[u.id] = sorted(set(role_perms) | set(custom_perms))
+
+    # Handle POST actions
     if request.method == "POST":
-        role_id = request.POST.get("role_id")
-        user_id = request.POST.get("user_id")
-        perm_id = request.POST.get("perm_id")
         action = request.POST.get("action")
 
-        try:
-            perm = ActionPermission.objects.get(id=perm_id)
-        except ActionPermission.DoesNotExist:
-            messages.error(request, "Invalid permission.")
-            return redirect("permissions_manage")
-
-        # --- Role permissions ---
-        if role_id:
-            try:
-                role = Role.objects.get(id=role_id)
-                if action == "add":
-                    role.permissions.add(perm)
-                    messages.success(request, f"✅ Added '{perm.name}' to role '{role.name}'.")
-                else:
-                    role.permissions.remove(perm)
-                    messages.warning(request, f"🚫 Removed '{perm.name}' from role '{role.name}'.")
-            except Role.DoesNotExist:
-                messages.error(request, "Role not found.")
-            return redirect("permissions_manage")
-
-        # --- User-specific (custom) permissions ---
-        if user_id:
+        # ✅ Bulk update: replace a user’s custom permissions
+        if action == "update_user_perms":
+            user_id = request.POST.get("user_id")
+            perm_ids = request.POST.getlist("perm_ids")
             try:
                 user_profile = UserProfile.objects.get(id=user_id)
-                if action == "add":
-                    user_profile.custom_permissions.add(perm)
-                    messages.success(request, f"✅ Added '{perm.name}' to user '{user_profile.user.username}'.")
-                else:
-                    user_profile.custom_permissions.remove(perm)
-                    messages.warning(request, f"🚫 Removed '{perm.name}' from user '{user_profile.user.username}'.")
             except UserProfile.DoesNotExist:
                 messages.error(request, "User not found.")
+                return redirect("permissions_manage")
+
+            try:
+                perm_ids_int = [int(i) for i in perm_ids]
+            except ValueError:
+                perm_ids_int = []
+
+            perms = ActionPermission.objects.filter(id__in=perm_ids_int)
+            user_profile.custom_permissions.set(perms)
+            user_profile.save()
+            messages.success(request, f"Updated custom permissions for {user_profile.user.username}.")
             return redirect("permissions_manage")
 
-    # ✅ Maps for templates
-    role_permission_map = {r.id: set(r.permissions.values_list("id", flat=True)) for r in roles}
-    user_permission_map = combined_permission_map  # includes role + custom
+        # ✅ Compatibility: single add/remove actions
+        role_id = request.POST.get("role_id")
+        perm_id = request.POST.get("perm_id")
+        user_id = request.POST.get("user_id")
+        single_action = request.POST.get("single_action")
 
+        if role_id and perm_id and single_action:
+            try:
+                role = Role.objects.get(id=role_id)
+                perm = ActionPermission.objects.get(id=perm_id)
+                if single_action == "add":
+                    role.permissions.add(perm)
+                else:
+                    role.permissions.remove(perm)
+                messages.success(request, f"Permission '{perm.name}' updated for role '{role.name}'.")
+            except Exception as e:
+                messages.error(request, f"Error: {e}")
+            return redirect("permissions_manage")
+
+        if user_id and perm_id and single_action:
+            try:
+                up = UserProfile.objects.get(id=user_id)
+                perm = ActionPermission.objects.get(id=perm_id)
+                if single_action == "add":
+                    up.custom_permissions.add(perm)
+                else:
+                    up.custom_permissions.remove(perm)
+                messages.success(request, f"Permission '{perm.name}' updated for user '{up.user.username}'.")
+            except Exception as e:
+                messages.error(request, f"Error: {e}")
+            return redirect("permissions_manage")
+
+    # ✅ Serialize maps for template
     context = {
         "permissions": permissions,
         "roles": roles,
         "users": users,
         "role_permission_map": role_permission_map,
-        "user_permission_map": user_permission_map,
+        "custom_permission_map": custom_permission_map,
+        "user_permission_map": combined_permission_map,
+        "role_perm_json": json.dumps(role_permission_map),
+        "custom_perm_json": json.dumps(custom_permission_map),
     }
-
     return render(request, "dashboard/permissions_manage.html", context)
 
 # ==============================================================
@@ -2320,37 +2421,93 @@ def admin_control_center(request):
 # ==============================================================
 # 🧩 ADMIN: MANAGE USERS
 # ==============================================================
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.shortcuts import render, redirect
 from django.contrib.auth.models import User
+from codingapp.models import Role, Department, UserProfile
+
 
 @login_required
 def admin_manage_users(request):
-    """View, add, and edit users and their roles/departments (supports bulk update with diagnostics)."""
-    profile = request.user.userprofile
-    if not profile or profile.role.name.lower() != "admin":
+    """Admin view to manage users, grouped by department and role."""
+
+    profile = getattr(request.user, "userprofile", None)
+    if not profile or not profile.role or profile.role.name.lower() != "admin":
         messages.error(request, "Access denied.")
         return redirect("dashboard")
 
+    # Load roles and departments
     roles = Role.objects.all().order_by("name")
     departments = Department.objects.all().order_by("name")
-    users = UserProfile.objects.select_related("user", "role", "department").order_by("user__username")
 
-    # This will hold debug data for display in template
-    debug_info = {}
+    # Prefetch all users with relations
+    users = (
+        UserProfile.objects.select_related("user", "role", "department")
+        .prefetch_related("custom_permissions")
+        .order_by("department__name", "role__name", "user__username")
+    )
 
+    search_query = request.GET.get("search", "").strip()
+
+    users = (
+        UserProfile.objects.select_related("user", "role", "department")
+        .prefetch_related("custom_permissions")
+        .order_by("department__name", "role__name", "user__username")
+    )
+
+    # ✅ Apply search filter
+    if search_query:
+        users = users.filter(
+            Q(user__username__icontains=search_query)
+            | Q(full_name__icontains=search_query)
+            | Q(user__email__icontains=search_query)
+            | Q(role__name__icontains=search_query)
+        )
+
+
+    # Group by department and role
+    structured_data = []
+    for dept in departments:
+        dept_users = [u for u in users if u.department == dept]
+        if not dept_users:
+            continue
+
+        dept_data = {"department": dept, "roles": []}
+        for role_name in ["HOD", "Teacher", "Student"]:
+            role_users = [
+                u for u in dept_users
+                if (u.role and u.role.name.lower() == role_name.lower())
+            ]
+            if role_users:
+                dept_data["roles"].append({
+                    "role_name": role_name,
+                    "users": role_users
+                })
+
+        # Add unassigned users within department
+        unassigned = [u for u in dept_users if not u.role]
+        if unassigned:
+            dept_data["roles"].append({
+                "role_name": "Unassigned",
+                "users": unassigned
+            })
+
+        structured_data.append(dept_data)
+
+    # Users without department
+    no_dept_users = [u for u in users if not u.department]
+    if no_dept_users:
+        structured_data.append({
+            "department": None,
+            "roles": [{"role_name": "Unassigned", "users": no_dept_users}]
+        })
+
+    # Handle form actions
     if request.method == "POST":
         action = request.POST.get("action")
-        debug_info["POST_action"] = action
-        debug_info["POST_selected_users"] = request.POST.getlist("selected_users")
-        debug_info["POST_bulk_role"] = request.POST.get("bulk_role")
-        debug_info["POST_bulk_dept"] = request.POST.get("bulk_dept")
 
-        print("⚙️ DEBUG POST:", dict(request.POST))
-        print("⚙️ Selected Users:", request.POST.getlist("selected_users"))
-        print("⚙️ Action:", action)
-        print("⚙️ Bulk Role:", request.POST.get("bulk_role"))
-        print("⚙️ Bulk Dept:", request.POST.get("bulk_dept"))
-
-        # ✅ Add new user
+        # ADD USER
         if action == "add_user":
             username = request.POST.get("username")
             email = request.POST.get("email")
@@ -2373,11 +2530,12 @@ def admin_manage_users(request):
             if dept_id:
                 profile.department = Department.objects.get(id=dept_id)
             profile.save()
+
             messages.success(request, f"User '{username}' added successfully.")
             return redirect("admin_manage_users")
 
-        # ✅ Individual update
-        if action == "update_user":
+        # INDIVIDUAL UPDATE
+        elif action == "update_user":
             user_id = request.POST.get("user_id")
             role_id = request.POST.get("role_id")
             dept_id = request.POST.get("dept_id")
@@ -2393,40 +2551,201 @@ def admin_manage_users(request):
                 messages.error(request, f"Error updating user: {e}")
             return redirect("admin_manage_users")
 
-        # ✅ Bulk update (with debug)
-        if action == "bulk_update":
+        # BULK UPDATE
+        elif action == "bulk_update":
             selected_ids = request.POST.getlist("selected_users")
             role_id = request.POST.get("bulk_role")
             dept_id = request.POST.get("bulk_dept")
-
-            print("⚙️ Processing bulk update — Selected:", selected_ids)
-
             if not selected_ids:
-                messages.warning(request, "No users selected for bulk update.")
+                messages.warning(request, "No users selected.")
                 return redirect("admin_manage_users")
 
             count = 0
             for uid in selected_ids:
                 try:
-                    profile = UserProfile.objects.get(id=uid)
+                    up = UserProfile.objects.get(id=uid)
                     if role_id:
-                        profile.role = Role.objects.get(id=role_id)
+                        up.role = Role.objects.get(id=role_id)
                     if dept_id:
-                        profile.department = Department.objects.get(id=dept_id)
-                    profile.save()
+                        up.department = Department.objects.get(id=dept_id)
+                    up.save()
                     count += 1
-                    print(f"✅ Updated user ID {uid}")
                 except Exception as e:
-                    print(f"❌ Error updating {uid}: {e}")
-                    messages.error(request, f"Error updating user ID {uid}: {e}")
-
+                    messages.error(request, f"Error updating user {uid}: {e}")
             messages.success(request, f"Bulk updated {count} users successfully.")
+            return redirect("admin_manage_users")
+
+        # TOGGLE ACTIVE
+        elif action == "toggle_active":
+            user_id = request.POST.get("user_id")
+            try:
+                profile = UserProfile.objects.get(id=user_id)
+                profile.user.is_active = not profile.user.is_active
+                profile.user.save()
+                state = "activated" if profile.user.is_active else "deactivated"
+                messages.success(request, f"User '{profile.user.username}' has been {state}.")
+            except Exception as e:
+                messages.error(request, f"Error toggling user: {e}")
+            return redirect("admin_manage_users")
+
+        # DELETE USER
+        elif action == "delete_user":
+            user_id = request.POST.get("user_id")
+            try:
+                profile = UserProfile.objects.get(id=user_id)
+                username = profile.user.username
+                profile.user.delete()
+                messages.success(request, f"User '{username}' deleted successfully.")
+            except Exception as e:
+                messages.error(request, f"Error deleting user: {e}")
+            return redirect("admin_manage_users")
+
+        # RESET PASSWORD
+        elif action == "reset_password":
+            user_id = request.POST.get("user_id")
+            new_password = request.POST.get("new_password")
+            try:
+                profile = UserProfile.objects.get(id=user_id)
+                profile.user.set_password(new_password)
+                profile.user.save()
+                messages.success(request, f"Password reset for '{profile.user.username}'.")
+            except Exception as e:
+                messages.error(request, f"Error resetting password: {e}")
+            return redirect("admin_manage_users")
+
+        # BULK ACTIVATE/DEACTIVATE/DELETE
+        elif action in ["bulk_activate", "bulk_deactivate", "bulk_delete"]:
+            selected_ids = request.POST.getlist("selected_users")
+            if not selected_ids:
+                messages.warning(request, "No users selected.")
+                return redirect("admin_manage_users")
+
+            count = 0
+            for uid in selected_ids:
+                try:
+                    up = UserProfile.objects.get(id=uid)
+                    if action == "bulk_delete":
+                        up.user.delete()
+                    elif action == "bulk_activate":
+                        up.user.is_active = True
+                        up.user.save()
+                    elif action == "bulk_deactivate":
+                        up.user.is_active = False
+                        up.user.save()
+                    count += 1
+                except Exception as e:
+                    messages.error(request, f"Error processing user {uid}: {e}")
+
+            verb = (
+                "deleted" if action == "bulk_delete"
+                else "activated" if action == "bulk_activate"
+                else "deactivated"
+            )
+            messages.success(request, f"{count} users {verb} successfully.")
             return redirect("admin_manage_users")
 
     context = {
         "roles": roles,
         "departments": departments,
-        "users": users,
-        "debug_info": debug_info,  # pass debug info to template
+        "structured_data": structured_data,
     }
     return render(request, "dashboard/admin_manage_users.html", context)
+
+@login_required
+def admin_manage_departments(request):
+    """Admin view to manage departments: create, edit, delete, assign HODs, with user stats."""
+    from django.db.models import Count, Q
+    from codingapp.models import Department, UserProfile
+
+    # 🔒 Access control
+    profile = getattr(request.user, "userprofile", None)
+    if not profile or not profile.role or profile.role.name.lower() != "admin":
+        messages.error(request, "Access denied.")
+        return redirect("dashboard")
+
+    # Annotate departments with teacher & student counts
+    departments = (
+        Department.objects.select_related("hod")
+        .annotate(
+            teacher_count=Count(
+                "userprofile",
+                filter=Q(userprofile__role__name__iexact="teacher"),
+            ),
+            student_count=Count(
+                "userprofile",
+                filter=Q(userprofile__role__name__iexact="student"),
+            ),
+        )
+        .order_by("name")
+    )
+
+    hod_candidates = (
+        UserProfile.objects.filter(role__name__iexact="hod")
+        .select_related("user")
+        .order_by("user__username")
+    )
+
+    # ✅ Handle actions
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        # ---------- Add Department ----------
+        if action == "add_department":
+            name = request.POST.get("name")
+            code = request.POST.get("code")
+            hod_id = request.POST.get("hod_id")
+
+            if not name or not code:
+                messages.error(request, "Name and code are required.")
+                return redirect("admin_manage_departments")
+
+            dept, created = Department.objects.get_or_create(name=name, code=code)
+            if hod_id:
+                try:
+                    hod_profile = UserProfile.objects.get(id=hod_id)
+                    dept.hod = hod_profile
+                except UserProfile.DoesNotExist:
+                    messages.warning(request, "Invalid HOD selected.")
+            dept.save()
+            messages.success(
+                request,
+                f"Department '{name}' {'added' if created else 'updated'} successfully.",
+            )
+            return redirect("admin_manage_departments")
+
+        # ---------- Update Department ----------
+        elif action == "update_department":
+            dept_id = request.POST.get("dept_id")
+            name = request.POST.get("name")
+            code = request.POST.get("code")
+            hod_id = request.POST.get("hod_id")
+
+            try:
+                dept = Department.objects.get(id=dept_id)
+                dept.name = name
+                dept.code = code
+                dept.hod = UserProfile.objects.get(id=hod_id) if hod_id else None
+                dept.save()
+                messages.success(request, f"Updated department '{dept.name}'.")
+            except Exception as e:
+                messages.error(request, f"Error updating department: {e}")
+            return redirect("admin_manage_departments")
+
+        # ---------- Delete Department ----------
+        elif action == "delete_department":
+            dept_id = request.POST.get("dept_id")
+            try:
+                dept = Department.objects.get(id=dept_id)
+                name = dept.name
+                dept.delete()
+                messages.success(request, f"Department '{name}' deleted.")
+            except Exception as e:
+                messages.error(request, f"Error deleting department: {e}")
+            return redirect("admin_manage_departments")
+
+    # ---------- Context ----------
+    context = {
+        "departments": departments,
+        "hod_candidates": hod_candidates,
+    }
+    return render(request, "dashboard/admin_manage_departments.html", context)
