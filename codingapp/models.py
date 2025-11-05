@@ -81,12 +81,27 @@ def validate_test_cases(value):
 # -----------------------------
 # Domain models
 # -----------------------------
+# --- Group model ---
 class Group(models.Model):
-    name = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=100)
+    department = models.ForeignKey(
+        'Department',
+        on_delete=models.CASCADE,
+        related_name='groups',
+        null=True,
+        blank=True
+    )
     students = models.ManyToManyField(User, related_name='custom_groups', blank=True)
 
+    class Meta:
+        unique_together = ('name', 'department')
+        ordering = ['department__name', 'name']
+
     def __str__(self):
+        if self.department:
+            return f"{self.name} ({self.department.name})"
         return self.name
+
 
 
 class Module(models.Model):
@@ -445,6 +460,7 @@ DEFAULT_PERMISSIONS = [
     ("hod_assign_permissions", "HOD Assign Permissions", "Allow HODs to grant permissions"),
     ("assign_teacher", "Assign Teachers", "Assign teachers to classes or courses"),
     ("assign_student", "Assign Students", "Assign students to classes or courses"),
+    ("manage_groups", "Manage Groups", "Create or delete groups (classes/sections)"),
 
     # Modules
     ("view_modules", "View Modules", "View list of modules"),
@@ -518,6 +534,7 @@ DEFAULT_PERMISSIONS = [
     ("teacher_manage_groups", "Manage Groups (Teacher)", "Teacher group management"),
     ("teacher_manage_quizzes", "Manage Quizzes (Teacher)", "Teacher quiz management"),
     ("teacher_manage_courses", "Manage Courses (Teacher)", "Teacher course management"),
+    ("manage_groups", "Manage Groups", "Create or delete groups (classes/sections)"),
 
     # Analytics / Performance
     ("view_student_performance", "View Student Performance", "View student analytics"),

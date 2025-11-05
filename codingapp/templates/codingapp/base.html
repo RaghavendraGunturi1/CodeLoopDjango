@@ -142,7 +142,7 @@
                             <li><a class="dropdown-item" href="{% url 'teacher_assessment_list' %}">Manage Assessments</a></li>
                         {% endif %}
                         {% if 'teacher_manage_groups' in user_perms or is_admin_like %}
-                            <li><a class="dropdown-item" href="{% url 'teacher_group_list' %}">Manage Groups</a></li>
+                            <li><a class="dropdown-item" href="{% url 'manage_groups' %}">Manage Groups</a></li>
                         {% endif %}
                         {% if 'teacher_manage_courses' in user_perms or is_admin_like %}
                             <li><a class="dropdown-item" href="{% url 'manage_courses' %}">Manage Courses</a></li>

@@ -1,0 +1,151 @@
+{% extends "codingapp/base.html" %}
+{% load static %}
+{% block content %}
+
+<div class="container mt-5">
+  <h2 class="mb-4 text-center">🏫 Manage Groups</h2>
+
+  {% for message in messages %}
+    <div class="alert alert-info">{{ message }}</div>
+  {% endfor %}
+
+  <!-- ADD NEW GROUP -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-success text-white">
+      <h5 class="mb-0">➕ Add or Edit Group</h5>
+    </div>
+    <div class="card-body">
+      <form method="POST">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_or_edit_group">
+        <input type="hidden" name="group_id" id="group_id">
+
+        <div class="row g-3 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label">Group Name</label>
+            <input type="text" name="name" id="group_name" class="form-control" placeholder="e.g. CSE - Section A" required>
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Department (optional)</label>
+            <select name="department_id" id="department_id" class="form-select">
+              <option value="">—</option>
+              {% for dept in departments %}
+                <option value="{{ dept.id }}">{{ dept.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Assign Students (optional)</label>
+            <select name="student_ids" id="student_ids" class="form-select" multiple>
+              {% for student in students %}
+                <option value="{{ student.id }}">{{ student.user.username }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="col-md-2">
+            <button type="submit" class="btn btn-success w-100">Save</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- EXISTING GROUPS -->
+  <div class="card shadow-sm">
+    <div class="card-header bg-primary text-white">
+      <h5 class="mb-0">📋 Existing Groups</h5>
+    </div>
+    <div class="card-body p-0">
+      <table class="table table-striped align-middle mb-0">
+        <thead class="table-dark">
+          <tr>
+            <th>Group</th>
+            <th>Department</th>
+            <th>Students</th>
+            <th style="width: 220px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for g in groups %}
+          <tr>
+            <td>{{ g.name }}</td>
+            <td>{{ g.department.name|default:"—" }}</td>
+            <td>
+              {% if g.students.count > 0 %}
+                {{ g.students.count }} Student{{ g.students.count|pluralize }}
+                <button class="btn btn-sm btn-outline-info ms-2" type="button" data-bs-toggle="collapse" data-bs-target="#students-{{ g.id }}">
+                  View
+                </button>
+                <ul id="students-{{ g.id }}" class="collapse list-group mt-2">
+                  {% for s in g.students.all %}
+                    <li class="list-group-item py-1">{{ s.username }}</li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <span class="text-muted">No students</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="d-flex gap-2 flex-wrap">
+                <button type="button" class="btn btn-sm btn-outline-warning"
+                        onclick="editGroup({{ g.id }}, {{ g.department.id|default:'null' }}, '{{ g.name|escapejs }}', [{% for s in g.students.all %}{{ s.id }}{% if not forloop.last %}, {% endif %}{% endfor %}])">
+                Edit
+                </button>
+
+
+                <form method="POST" style="display:inline;" onsubmit="return confirm('Delete {{ g.name }}?');">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="delete_group">
+                  <input type="hidden" name="group_id" value="{{ g.id }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="4" class="text-center text-muted py-3">No groups found.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ========================= JS ========================= -->
+<script>
+function editGroup(id, name, departmentId) {
+  document.getElementById('group_id').value = id;
+  document.getElementById('group_name').value = name;
+  document.getElementById('department_id').value = departmentId;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function editGroup(id, departmentId, name, studentIds) {
+  // Fill fields safely
+  const groupField = document.getElementById('group_id');
+  const nameField = document.getElementById('group_name');
+  const deptSelect = document.getElementById('department_id');
+  const studentSelect = document.getElementById('student_ids');
+
+  if (groupField && nameField && deptSelect && studentSelect) {
+    groupField.value = id;
+    nameField.value = name;
+    deptSelect.value = departmentId ?? '';
+
+    // Reset all student options
+    for (const option of studentSelect.options) {
+      option.selected = studentIds.includes(parseInt(option.value));
+    }
+  }
+
+  // Scroll smoothly to the form
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+</script>
+
+{% endblock %}
