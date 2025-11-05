@@ -12,6 +12,7 @@ urlpatterns = [
     path('dashboard/permissions/hod/', views.permissions_hod, name='permissions_hod'),
     path('dashboard/admin/control/', views.admin_control_center, name='admin_control_center'),
     path('dashboard/admin/users/', views.admin_manage_users, name='admin_manage_users'),
+    path("dashboard/admin/departments/", views.admin_manage_departments, name="admin_manage_departments"),
 
     # Core Routes
     path('', views.home, name='home'),
