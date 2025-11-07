@@ -43,8 +43,31 @@
     {% if results %}
         <hr>
         <h5>Test Case Results</h5>
-        {% endif %}
+        <div class="table-responsive">
+            <table class="table table-bordered table-dark">
+                <thead>
+                    <tr><th>Input</th><th>Expected Output</th><th>Your Output</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                {% for r in results %}
+                    <tr>
+                        <td><pre>{{ r.input }}</pre></td>
+                        <td><pre>{{ r.expected_output|join:"\n" }}</pre></td>
+                        <td><pre>{{ r.actual_output|join:"\n" }}</pre></td>
+                        <td class="{% if r.status == 'Accepted' %}text-success{% else %}text-danger{% endif %}">
+                            {{ r.status }}
+                            {% if r.error_message %}
+                                <pre class="text-danger small">{{ r.error_message }}</pre>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% endif %}
 
+    {{ user_submissions|json_script:"user-submissions-data" }}
 {% endblock %}
 
 {% block assessment_extra_js %}
@@ -58,89 +81,137 @@ document.addEventListener("DOMContentLoaded", function() {
         c: "text/x-csrc", cpp: "text/x-c++src"
     };
 
-    const initialTaskId = "{{ task_id }}";
-    const API_STATUS_URL = "{% url 'check_submission_status' task_id='DUMMY_TASK_ID' %}";
-    const pollingMessageContainer = document.getElementById('polling-status-message');
-    
-    editor = CodeMirror.fromTextArea(codeTextarea, {
+    // --- Initialize CodeMirror ---
+    const editor = CodeMirror.fromTextArea(codeTextarea, {
         lineNumbers: true,
         matchBrackets: true,
         autoCloseBrackets: true,
         theme: "dracula",
         mode: languageModes[langSelect.value] || "python",
-        readOnly: readOnlyMode
+        readOnly: readOnlyMode,
+        cursorBlinkRate: readOnlyMode ? -1 : 530
     });
 
-    const editorWrapper = editor.getWrapperElement();
-    editorWrapper.addEventListener('cut', (e) => e.preventDefault());
-    editorWrapper.addEventListener('copy', (e) => e.preventDefault());
-    editorWrapper.addEventListener('paste', (e) => e.preventDefault());
+    // ✅ Robust copy/paste/cut blocking
+    setTimeout(() => {
+        const inputField = editor.getInputField();
+        ["cut", "copy", "paste"].forEach(event =>
+            inputField.addEventListener(event, e => e.preventDefault())
+        );
+    }, 300);
 
-    if (!readOnlyMode) {
-        langSelect.addEventListener("change", () => editor.setOption("mode", languageModes[langSelect.value]));
+    // --- Restore multi-language submissions ---
+    let userSubmissions = {};
+    const dataElem = document.getElementById("user-submissions-data");
+    if (dataElem) {
+        try {
+            userSubmissions = JSON.parse(dataElem.textContent) || {};
+        } catch (err) {
+            console.error("Failed to parse user_submissions JSON", err);
+        }
     }
 
+    // Set initial code if stored
+    if (userSubmissions[langSelect.value]) {
+        editor.setValue(userSubmissions[langSelect.value]);
+    }
+
+    // --- Handle language switching ---
+    langSelect.addEventListener("change", function() {
+        const newLang = this.value;
+
+        // Save current code into memory
+        const currentMode = editor.getOption("mode");
+        const reverseMap = Object.fromEntries(Object.entries(languageModes).map(([k, v]) => [v, k]));
+        const currentLangKey = reverseMap[currentMode] || langSelect.value;
+        userSubmissions[currentLangKey] = editor.getValue();
+
+        // Switch syntax mode
+        editor.setOption("mode", languageModes[newLang]);
+
+        // Load code for new language or blank
+        if (userSubmissions[newLang]) {
+            editor.setValue(userSubmissions[newLang]);
+        } else {
+            editor.setValue("");
+        }
+    });
+
+    // --- Handle submission ---
     const form = document.querySelector("#assessment-submission-form");
     const submitBtn = form.querySelector("button[type='submit']");
-    
     form.addEventListener("submit", (e) => {
         e.preventDefault();
         editor.save();
-        if (!editor.getValue().trim()) {
+        const code = editor.getValue().trim();
+        if (!code) {
             alert("Code cannot be empty!");
             return;
         }
+
+        // Save current code in memory before submit
+        userSubmissions[langSelect.value] = code;
+
         if (submitBtn) {
             submitBtn.disabled = true;
-            submitBtn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Submitting...`;
+            submitBtn.innerHTML = `
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Submitting...
+            `;
         }
-        setTimeout(() => { form.submit(); }, 100); 
+
+        setTimeout(() => form.submit(), 100);
     });
 
-    // ⭐ FIX: Logic to handle button state during polling
+    // --- Polling logic for async status ---
+    const initialTaskId = "{{ task_id }}";
+    const API_STATUS_URL = "{% url 'check_submission_status' task_id='DUMMY_TASK_ID' %}";
+    const pollingMessageContainer = document.getElementById('polling-status-message');
+
     if (initialTaskId && initialTaskId !== 'None') {
         if (submitBtn) {
             submitBtn.disabled = true;
             submitBtn.innerHTML = `
-                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                Processing...
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...
             `;
         }
 
-        const pollInterval = 2000;
         const url = API_STATUS_URL.replace('DUMMY_TASK_ID', initialTaskId);
-        
-        const intervalId = setInterval(function() {
+        const intervalId = setInterval(() => {
             fetch(url)
-                .then(response => response.json())
+                .then(res => res.json())
                 .then(data => {
                     if (pollingMessageContainer) {
-                         pollingMessageContainer.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> Submission processing... Status: ${data.status}`;
+                        pollingMessageContainer.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Submission processing... Status: ${data.status}`;
                     }
                     if (data.ready) {
                         clearInterval(intervalId);
-                        window.location.reload(); 
+                        window.location.reload();
                     }
                 })
-                .catch(error => {
-                    console.error('Polling error:', error);
+                .catch(err => {
+                    console.error("Polling error:", err);
                     clearInterval(intervalId);
-                    if (pollingMessageContainer) {
-                         pollingMessageContainer.textContent = 'Error checking status.';
-                    }
+                    if (pollingMessageContainer)
+                        pollingMessageContainer.textContent = 'Error checking status.';
                     if (submitBtn) {
                         submitBtn.disabled = false;
                         submitBtn.textContent = 'Submit Code';
                     }
                 });
-        }, pollInterval);
+        }, 2000);
     }
 });
 </script>
+
 <style>
     .CodeMirror {
         height: 400px;
         border: 1px solid #ddd;
     }
+    .CodeMirror.cm-s-dracula.CodeMirror-readonly {
+        opacity: 0.6;
+        pointer-events: none;
+    }
 </style>
 {% endblock %}
+

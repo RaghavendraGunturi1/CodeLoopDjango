@@ -67,7 +67,15 @@
           <tr>
             <td>{{ dept.name }}</td>
             <td>{{ dept.code }}</td>
-            <td>{{ dept.hod.user.userprofile.full_name|default:dept.hod.user.username }}</td>
+            <td>
+              {# Safe check: dept.hod is stored as a UserProfile or may be null #}
+              {% if dept.hod %}
+                {# Use full_name when available; fall back to username #}
+                {{ dept.hod.full_name|default:dept.hod.user.username }}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
             <td>{{ dept.user_count }}</td>
           </tr>
           {% empty %}
@@ -100,6 +108,11 @@
             <td>{{ perm.name }}</td>
             <td>{{ perm.description|default:"—" }}</td>
             <td>
+              {% comment %}
+                Iterate roles and show badges for roles that include this permission.
+                This uses `perm in role.permissions.all` which will perform queries if not prefetched.
+                Consider prefetching `roles__permissions` in the view for efficiency.
+              {% endcomment %}
               {% for role in roles %}
                 {% if perm in role.permissions.all %}
                   <span class="badge bg-primary">{{ role.name|title }}</span>

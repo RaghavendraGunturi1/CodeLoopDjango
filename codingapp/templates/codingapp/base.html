@@ -7,7 +7,6 @@
     <title>{% block title %}CodeLoop{% endblock %}</title>
 
     <link rel="stylesheet" href="{% static 'css/main.css' %}">
-    
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css" rel="stylesheet">
@@ -15,7 +14,6 @@
     {% block welcome_styles %}{% endblock %} 
 
     <style>
-        /* Base styles for non-welcome pages */
         body {
             padding-top: 90px; 
             background-color: var(--body-bg, #0d1117); 
@@ -26,7 +24,6 @@
             z-index: 2; 
             padding: 2rem;
         }
-        /* Background Boxes Styles */
         #boxes-background {
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
@@ -42,9 +39,8 @@
         .grid-row { display: block; }
         .box {
             width: 8rem; height: 4rem;
-            border-right: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
-            border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
-            position: relative;
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
             transition: background-color 0s;
         }
         .glow-card::before {
@@ -73,13 +69,9 @@
 </head>
 
 <body>
-    <div id="boxes-background">
-        <div class="grid-container"></div>
-    </div>
-    
+    <div id="boxes-background"><div class="grid-container"></div></div>
     {% block spline_embed %}{% endblock %}
 
-    {% comment %} Conditionally render the main navbar {% endcomment %}
     {% if not focus_mode %}
     <div class="floating-nav-wrapper">
         <ul class="floating-nav-list" id="floating-nav">
@@ -95,15 +87,12 @@
             {% if user.is_authenticated %}
                 <li class="nav-item"><a class="nav-link" href="{% url 'dashboard' %}"><i class="bi bi-speedometer2 me-1"></i> Dashboard</a></li>
                 <li class="nav-item"><a class="nav-link" href="{% url 'module_list' %}"><i class="bi bi-box-seam me-1"></i> Modules</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'notes_list' %}"><i class="bi bi-box-seam me-1"></i> Notes</a></li>
-                <li class="nav-item"><a class="nav-link" href="{% url 'course_list' %}"><i class="bi bi-box-seam me-1"></i> Courses</a></li>
+                <li class="nav-item"><a class="nav-link" href="{% url 'notes_list' %}"><i class="bi bi-journal me-1"></i> Notes</a></li>
+                <li class="nav-item"><a class="nav-link" href="{% url 'course_list' %}"><i class="bi bi-book me-1"></i> Courses</a></li>
                 <li class="nav-item"><a class="nav-link" href="{% url 'question_list' %}"><i class="bi bi-question-circle me-1"></i> Practice</a></li>
                 <li class="nav-item"><a class="nav-link" href="{% url 'assessment_list' %}"><i class="bi bi-check2-square me-1"></i> Assessments</a></li>
                 <li class="nav-item"><a class="nav-link" href="{% url 'assessment_leaderboard_list' %}"><i class="bi bi-trophy me-1"></i> Leaderboards</a></li>
-                
-                <!-- ==============================
-                     MANAGE DROPDOWN (Permission-aware)
-                     ============================== -->
+
                 {% if user_perms %}
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button"
@@ -112,13 +101,13 @@
                     </a>
 
                     <ul class="dropdown-menu dropdown-menu-dark" aria-labelledby="navbarDropdown">
-                        <!-- 👑 ADMIN ITEMS -->
-                        {% if 'access_admin_panel' in user_perms or 'manage_users' in user_perms or is_admin_like %}
+                        
+                        <!-- 👑 ADMIN -->
+                        {% if 'access_admin_panel' in user_perms or 'manage_users' in user_perms or role_name == 'admin' %}
                             <li><a class="dropdown-item" href="{% url 'admin_control_center' %}">Admin Control Center</a></li>
                             <li><a class="dropdown-item" href="{% url 'admin_manage_users' %}">Manage Users</a></li>
                             <li><a class="dropdown-item" href="{% url 'permissions_manage' %}">Manage Permissions</a></li>
                             <li><a class="dropdown-item" href="{% url 'admin_manage_departments' %}">Manage Departments</a></li>
-
                             <li><hr class="dropdown-divider"></li>
                         {% endif %}
 
@@ -128,31 +117,29 @@
                             <li><hr class="dropdown-divider"></li>
                         {% endif %}
 
-                        <!-- 🧑‍🏫 TEACHER (and Admin also sees) -->
-                        {% if 'teacher_manage_modules' in user_perms or is_admin_like %}
+                        <!-- 🧑‍🏫 TEACHER -->
+                        {% if 'create_module' in user_perms or 'edit_module' in user_perms or is_admin_like %}
                             <li><a class="dropdown-item" href="{% url 'teacher_module_list' %}">Manage Modules</a></li>
                         {% endif %}
-                        {% if 'teacher_manage_questions' in user_perms or is_admin_like %}
+                        {% if 'create_question' in user_perms or 'edit_question' in user_perms or is_admin_like %}
                             <li><a class="dropdown-item" href="{% url 'teacher_question_list' %}">Manage Questions</a></li>
                         {% endif %}
-                        {% if 'teacher_manage_quizzes' in user_perms or is_admin_like %}
+                        {% if 'create_quiz' in user_perms or 'edit_quiz' in user_perms or is_admin_like %}
                             <li><a class="dropdown-item" href="{% url 'teacher_quiz_list' %}">Manage Quizzes</a></li>
                         {% endif %}
-                        {% if 'teacher_manage_assessments' in user_perms or is_admin_like %}
+                        {% if 'assign_quiz' in user_perms or 'grade_quiz' in user_perms or is_admin_like %}
                             <li><a class="dropdown-item" href="{% url 'teacher_assessment_list' %}">Manage Assessments</a></li>
                         {% endif %}
-                        {% if 'teacher_manage_groups' in user_perms or is_admin_like %}
+                        {% if 'manage_groups' in user_perms or is_admin_like %}
                             <li><a class="dropdown-item" href="{% url 'manage_groups' %}">Manage Groups</a></li>
                         {% endif %}
-                        {% if 'teacher_manage_courses' in user_perms or is_admin_like %}
+                        {% if 'manage_courses' in user_perms or 'create_course' in user_perms or is_admin_like %}
                             <li><a class="dropdown-item" href="{% url 'manage_courses' %}">Manage Courses</a></li>
                         {% endif %}
-                        {% if 'upload_notes' in user_perms or is_admin_like %}
+                        {% if 'add_note' in user_perms or 'edit_notes' in user_perms or is_admin_like %}
                             <li><a class="dropdown-item" href="{% url 'add_note' %}">Manage Study Material</a></li>
                         {% endif %}
-                        <li><hr class="dropdown-divider"></li>
-
-                        {% if 'view_student_performance' in user_perms or is_admin_like %}
+                        {% if 'view_performance' in user_perms or is_admin_like %}
                             <li><a class="dropdown-item" href="{% url 'student_performance_list' %}">Student Performance</a></li>
                         {% endif %}
                         {% if 'reset_assessment_submissions' in user_perms or is_admin_like %}
@@ -172,9 +159,8 @@
                     </ul>
                 </li>
                 {% endif %}
-                <!-- END MANAGE MENU -->
 
-                <!-- Profile Menu -->
+                <!-- 👤 PROFILE MENU -->
                 <li class="nav-item dropdown ms-3">
                     <a class="nav-link dropdown-toggle" href="#" id="profileDropdown" role="button"
                        data-bs-toggle="dropdown" aria-expanded="false">
@@ -208,139 +194,67 @@
     </div>
     {% endif %}
     
-    <div class="main-content container-fluid">
-        {% block content %}{% endblock %}
-    </div>
+    <div class="main-content container-fluid">{% block content %}{% endblock %}</div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     {% block extra_js %}{% endblock %}
 
     <script>
-        document.addEventListener("DOMContentLoaded", function() {
-            // Helper function to clean up paths for comparison
-            const cleanPath = (path) => path?.replace(/\/$/, '') || '';
-
-            // --- Floating Lamp Navbar Script ---
-            const navList = document.getElementById('floating-nav');
-            if (navList) { // Only run if the main navbar exists
-                const indicator = document.getElementById('nav-indicator');
-                const navLinks = navList.querySelectorAll('.nav-link:not([data-bs-toggle="dropdown"])');
-                const dashboardPath = '{% url "dashboard" %}';
-                const homePath = '{% url "home" %}';
-            }
-            function moveIndicator(target) {
-                if (!target) return;
-
-                const targetRect = target.getBoundingClientRect();
-                const listRect = navList.getBoundingClientRect();
-
-                // Calculate width and horizontal offset
-                const width = targetRect.width;
-                const offsetLeft = targetRect.left - listRect.left;
-
-                indicator.style.width = `${width}px`;
-                indicator.style.transform = `translateX(${offsetLeft}px)`;
-
-                // Remove active class from ALL links that move the indicator
-                navLinks.forEach(link => link.classList.remove('active'));
-                
-                // Set active class on the target link
-                target.classList.add('active');
-            }
-
-            // 1. Initial positioning on load
-            const currentPath = cleanPath(window.location.pathname);
-            let activeLink = null;
-
-            // Find the best link match
-            navLinks.forEach(link => {
-                const linkPath = cleanPath(link.getAttribute('href'));
-                
-                // Priority 1: Exact match
-                if (linkPath === currentPath) {
-                    activeLink = link;
-                }
-                // Priority 2: Partial matches for detail/edit/view pages
-                else if (linkPath !== homePath && linkPath.length > 1 && currentPath.startsWith(linkPath)) {
-                    // Only assign if we haven't found a better exact match
-                    if (!activeLink || cleanPath(activeLink.getAttribute('href')).length < linkPath.length) {
-                         activeLink = link;
-                    }
-                }
-            });
-
-            // Priority 3: Fallback for home/dashboard
-            if (!activeLink && (currentPath === homePath || currentPath === dashboardPath || currentPath === '/')) {
-                // Ensure the 'Dashboard' link is targeted if a user is logged in
-                activeLink = navList.querySelector(`a[href="${dashboardPath}"]`);
-            }
-            
-            // If the active link is found, move the indicator to it
-            if (activeLink) {
-                moveIndicator(activeLink);
-            } else {
-                // Hide the indicator if no link is active (e.g., on a 404 page)
-                indicator.style.width = '0px';
-            }
-
-
-            // 2. Add event listeners for dynamic movement on click
-            navLinks.forEach(link => {
-                link.addEventListener('click', function(e) {
-                    // Only move the indicator for simple links
-                    if (!e.currentTarget.classList.contains('dropdown-toggle')) {
-                        moveIndicator(e.currentTarget);
-                    }
-                });
-            });
-
-            // 3. Recalculate indicator position on window resize
-            window.addEventListener('resize', () => {
-                const currentActive = navList.querySelector('.nav-link.active');
-                if (currentActive) {
-                    moveIndicator(currentActive);
-                }
-            });
-
-            // --- Background Boxes Script ---
-            const container = document.querySelector("#boxes-background .grid-container");
-            if (container) {
-                const rows = 30, cols = 30;
-                const colors = ["rgb(125 211 252)", "rgb(249 168 212)", "rgb(134 239 172)", "rgb(253 224 71)", "rgb(252 165 165)", "rgb(216 180 254)", "rgb(147 197 253)", "rgb(165 180 252)", "rgb(196 181 253)"];
-                const getRandomColor = () => colors[Math.floor(Math.random() * colors.length)];
-                let output = "";
-                for (let i = 0; i < rows; i++) {
-                    output += '<div class="grid-row">';
-                    for (let j = 0; j < cols; j++) { output += '<div class="box"></div>'; }
-                    output += '</div>';
-                }
-                container.innerHTML = output;
-                const boxes = document.querySelectorAll(".box");
-                boxes.forEach(box => {
-                    box.addEventListener("mouseover", () => { box.style.backgroundColor = getRandomColor(); });
-                    box.addEventListener("mouseout", () => {
-                        setTimeout(() => { box.style.transition = 'background-color 2s'; box.style.backgroundColor = "transparent"; }, 200);
-                        setTimeout(() => { box.style.transition = 'background-color 0s'; }, 2200);
-                    });
-                });
-            }
-            // --- End Background Boxes Script ---
-
-            // --- Glowing Border Script ---
-            const glowCards = document.querySelectorAll(".glow-card");
-            glowCards.forEach(card => {
-                card.addEventListener("pointermove", (e) => {
-                    const rect = card.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const y = e.clientY - rect.top;
-                    const angle = (Math.atan2(y - rect.height / 2, x - rect.width / 2) * 180 / Math.PI) - 90;
-                    card.style.setProperty('--start-angle', angle + 'deg');
-                    card.style.setProperty('--active-opacity', '1');
-                });
-                card.addEventListener("pointerleave", () => { card.style.setProperty('--active-opacity', '0'); });
-            });
-            // --- End Glowing Border Script ---
+    document.addEventListener("DOMContentLoaded", function() {
+        // --- Floating Navbar Indicator ---
+        const navList = document.getElementById('floating-nav');
+        if (!navList) return;
+        const indicator = document.getElementById('nav-indicator');
+        const navLinks = navList.querySelectorAll('.nav-link:not([data-bs-toggle="dropdown"])');
+        const cleanPath = (p) => p?.replace(/\/$/, '') || '';
+        const current = cleanPath(window.location.pathname);
+        const move = (el) => {
+            const r1 = el.getBoundingClientRect(), r2 = navList.getBoundingClientRect();
+            indicator.style.width = `${r1.width}px`;
+            indicator.style.transform = `translateX(${r1.left - r2.left}px)`;
+            navLinks.forEach(l => l.classList.remove('active'));
+            el.classList.add('active');
+        };
+        navLinks.forEach(l => l.addEventListener('click', () => move(l)));
+        window.addEventListener('resize', () => {
+            const active = navList.querySelector('.nav-link.active');
+            if (active) move(active);
         });
+
+        // --- Background Boxes Animation ---
+        const container = document.querySelector("#boxes-background .grid-container");
+        if (container) {
+            const rows = 30, cols = 30;
+            const colors = ["#7DD3FC", "#F9A8D4", "#86EFAC", "#FDE047", "#FCA5A5", "#D8B4FE", "#93C5FD", "#A5B4FC", "#C4B5FD"];
+            let html = "";
+            for (let i = 0; i < rows; i++) {
+                html += "<div class='grid-row'>";
+                for (let j = 0; j < cols; j++) html += "<div class='box'></div>";
+                html += "</div>";
+            }
+            container.innerHTML = html;
+            document.querySelectorAll(".box").forEach(box => {
+                box.addEventListener("mouseover", () => { box.style.backgroundColor = colors[Math.floor(Math.random()*colors.length)]; });
+                box.addEventListener("mouseout", () => {
+                    setTimeout(() => box.style.transition='background-color 2s',200);
+                    setTimeout(() => box.style.backgroundColor="transparent",200);
+                    setTimeout(() => box.style.transition='background-color 0s',2200);
+                });
+            });
+        }
+
+        // --- Glow Card Hover Effect ---
+        document.querySelectorAll(".glow-card").forEach(card => {
+            card.addEventListener("pointermove", e => {
+                const r = card.getBoundingClientRect();
+                const x = e.clientX - r.left, y = e.clientY - r.top;
+                const a = (Math.atan2(y - r.height/2, x - r.width/2) * 180 / Math.PI) - 90;
+                card.style.setProperty('--start-angle', a + 'deg');
+                card.style.setProperty('--active-opacity', '1');
+            });
+            card.addEventListener("pointerleave", () => card.style.setProperty('--active-opacity', '0'));
+        });
+    });
     </script>
 </body>
 </html>
