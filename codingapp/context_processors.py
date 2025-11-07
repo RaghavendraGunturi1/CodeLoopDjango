@@ -1,6 +1,6 @@
-from .models import Notice, NoticeReadStatus
 from django.db.models import Q
-from django.db.models import Q
+from codingapp.models import Notice, NoticeReadStatus, UserProfile
+
 
 def unread_notice_count(request):
     if request.user.is_authenticated:
@@ -13,28 +13,34 @@ def unread_notice_count(request):
         return {'unread_notice_count': unread_count}
     return {}
 
-# codingapp/context_processors.py
-def current_user_permissions(request):
-    """
-    Adds `user_perms` (set of permission codes) and `is_admin_like` boolean
-    to the template context so navbar and other templates can use them.
-    """
-    user_perms = set()
-    is_admin_like = False
 
-    user = getattr(request, "user", None)
-    if user and user.is_authenticated:
-        try:
-            profile = getattr(user, "userprofile", None)
-            if profile:
-                user_perms = profile.permission_codes()
-                # optionally expose a convenient boolean for admin-like roles
-                is_admin_like = (profile.role and profile.role.name.lower() == "admin")
-        except Exception:
-            # fail safe => empty perms
-            user_perms = set()
+def user_permissions_context(request):
+    """
+    Inject the logged-in user's permissions and role info into every template.
+    Ensures Manage dropdown, Control Panel, etc. appear properly.
+    """
+    if not request.user.is_authenticated:
+        return {}
 
-    return {
-        "user_perms": user_perms,
-        "is_admin_like": is_admin_like,
-    }
+    try:
+        profile = getattr(request.user, "userprofile", None)
+        if not profile:
+            return {}
+
+        user_perms = set(profile.permission_codes())
+        role_name = profile.role.name.lower() if profile.role else None
+        is_admin_like = role_name in ["admin", "hod"]
+        is_teacher_like = role_name == "teacher"
+        is_student = role_name == "student"
+
+        return {
+            "user_perms": user_perms,
+            "role_name": role_name,
+            "is_admin_like": is_admin_like,
+            "is_teacher_like": is_teacher_like,
+            "is_student": is_student,
+        }
+
+    except Exception as e:
+        print(f"[ContextProcessor Error] user_permissions_context: {e}")
+        return {}

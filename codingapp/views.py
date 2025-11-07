@@ -289,97 +289,149 @@ def question_list(request):
 
 @login_required
 def question_detail(request, pk):
+    from celery.result import AsyncResult
+    import json
+    from django.conf import settings
+
     q = get_object_or_404(Question, pk=pk)
 
+    # --- Access control ---
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
         if not q.module or not q.module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
-    # Variables for managing the asynchronous state
-    task_id = request.session.get(f'submission_task_id_{pk}')
+    # -------------------------
+    # Initialize variables
+    # -------------------------
     results = None
     error = None
-    
-    # Get last saved code/language from session or last submission
-    code = request.session.get(f'code_{pk}', '')
-    lang = request.session.get(f'language_{pk}', 'python')
 
-    # 1. Handle submission attempt (POST)
+    # --- Determine currently selected language ---
+    if request.method == "POST":
+        selected_lang = request.POST.get("language", "python")
+    else:
+        selected_lang = request.session.get(f'last_language_{pk}', request.session.get(f'language_{pk}', 'python'))
+
+    # Session key patterns (store separately for each language)
+    session_code_key = f'code_{pk}_{selected_lang}'
+    session_task_key = f'submission_task_id_{pk}_{selected_lang}'
+
+    # Load existing task/code from session (if any)
+    task_id = request.session.get(session_task_key)
+    code = request.session.get(session_code_key, '')
+
+    # -------------------------
+    # 1️⃣ Handle Submission (POST)
+    # -------------------------
     if request.method == "POST":
         code = request.POST.get("code", "").strip()
         lang = request.POST.get("language", "python")
-        
+
         if not code:
-            messages.error(request, "Code cannot be empty")
+            messages.error(request, "Code cannot be empty.")
         else:
-            # ⭐ ASYNCHRONOUS CALL: Enqueue the code execution task
+            # ⭐ Run async submission
             task = process_practice_submission.delay(request.user.id, q.id, code, lang)
-            
-            # Store task ID and code/lang for session tracking
-            request.session[f'submission_task_id_{pk}'] = task.id
-            request.session[f'code_{pk}'] = code
+
+            # Save per-language info in session
+            request.session[f'submission_task_id_{pk}_{lang}'] = task.id
+            request.session[f'code_{pk}_{lang}'] = code
+            request.session[f'last_language_{pk}'] = lang
             request.session[f'language_{pk}'] = lang
             request.session.modified = True
 
             messages.info(request, "Your code is being processed in the background. Please wait or check back shortly.")
-            # Redirect immediately to prevent synchronous waiting
             return redirect('question_detail', pk=pk)
 
-    # 2. Handle status check and display results (GET)
+    # -------------------------
+    # 2️⃣ Handle async task status (GET)
+    # -------------------------
     if task_id:
         task_result = AsyncResult(task_id)
-        
+
         if task_result.ready():
-            # Task finished, retrieve result and clean up
-            request.session.pop(f'submission_task_id_{pk}', None)
+            # Remove task marker once finished
+            request.session.pop(session_task_key, None)
             request.session.modified = True
-            
-            # Fetch the updated submission object (saved by the Celery task)
-            latest_submission = Submission.objects.filter(user=request.user, question=q).order_by('-submitted_at').first()
-            
+
+            # Fetch last DB submission for this language
+            latest_submission = Submission.objects.filter(
+                user=request.user,
+                question=q,
+                language=selected_lang
+            ).order_by('-submitted_at').first()
+
             if latest_submission:
-                # The 'output' field now contains the JSON list of test case results
                 try:
-                    results = json.loads(latest_submission.output)
+                    results = json.loads(latest_submission.output) if latest_submission.output else None
                 except json.JSONDecodeError:
                     results = None
-                
-                # Set dynamic messages based on the final status
+
                 if latest_submission.status == "Accepted":
-                    messages.success(request, "Code Accepted! All test cases passed.")
-                elif latest_submission.status == 'Error':
-                    messages.error(request, f"Code Execution Error: {latest_submission.error}")
-                    error = latest_submission.error # Pass error to context for display
-                else: # Rejected or Pending (if something went wrong with status setting)
-                    messages.warning(request, "Code Rejected. Some test cases failed.")
-            
-            task_id = None # Task is resolved
+                    messages.success(request, "✅ Code Accepted! All test cases passed.")
+                elif latest_submission.status == "Error":
+                    messages.error(request, f"❌ Code Execution Error: {latest_submission.error}")
+                    error = latest_submission.error
+                else:
+                    messages.warning(request, "⚠️ Some test cases failed. Try again.")
+            task_id = None
 
         else:
-            # Task is still running
-            messages.info(request, f"Code submission is processing... Status: {task_result.status}")
+            messages.info(request, f"Submission is processing... Status: {task_result.status}")
 
-    # 3. Load initial code/last submission code for editor if nothing is in session/results
+    # -------------------------
+    # 3️⃣ Load code if not in session
+    # -------------------------
     if not code:
-        last_submission = Submission.objects.filter(user=request.user, question=q).order_by('-submitted_at').first()
+        last_submission = Submission.objects.filter(
+            user=request.user,
+            question=q,
+            language=selected_lang
+        ).order_by('-submitted_at').first()
+
         if last_submission:
-            code, lang = last_submission.code, last_submission.language
+            code = last_submission.code
             if not results and last_submission.output:
                 try:
                     results = json.loads(last_submission.output)
                 except json.JSONDecodeError:
                     pass
 
-    return render(request, "codingapp/question_detail.html", {
+    # -------------------------
+    # 4️⃣ Build user_submissions map (for all languages)
+    # -------------------------
+    # Collect DB submissions
+    db_codes = {
+        s.language: s.code
+        for s in Submission.objects.filter(user=request.user, question=q)
+    }
+
+    # Merge with session codes (to include unsaved async submissions)
+    session_codes = {}
+    for key, val in request.session.items():
+        if key.startswith(f'code_{pk}_'):
+            lang_name = key.split(f'code_{pk}_', 1)[1]
+            session_codes[lang_name] = val
+
+    user_submissions = {**db_codes, **session_codes}
+
+    # -------------------------
+    # 5️⃣ Prepare context and render
+    # -------------------------
+    context = {
         "question": q,
         "code": code,
-        "selected_language": lang,
+        "selected_language": selected_lang,
         "results": results,
         "error": error,
-        "task_id": task_id, # Pass task_id to the template for client-side polling
-        "supported_languages": settings.SUPPORTED_LANGUAGES, 
-    })
+        "task_id": task_id,
+        "supported_languages": settings.SUPPORTED_LANGUAGES,
+        "user_submissions": user_submissions,
+    }
+
+    return render(request, "codingapp/question_detail.html", context)
+
 
 from django.views.decorators.http import require_POST
 from .models import Module, ModuleCompletion, Submission
@@ -689,111 +741,175 @@ from django.contrib.auth.decorators import login_required
 
 @login_required
 def submit_assessment_code(request, assessment_id, question_id):
+    # kept local imports (as in your style)
+    from celery.result import AsyncResult
+    import json
+    from django.conf import settings
+    from django.db.models import Max
+
     assessment = get_object_or_404(Assessment, id=assessment_id)
     current_question_obj = get_object_or_404(Question, id=question_id)
 
-    # Permission checks (kept as is)
+    # ✅ Permission check (unchanged)
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
         if not assessment.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
     session = get_object_or_404(AssessmentSession, user=request.user, assessment=assessment)
+
     if assessment.quiz and not session.quiz_submitted:
         messages.error(request, "You must complete the quiz section before accessing coding questions.")
         return redirect('assessment_detail', assessment_id=assessment.id)
 
+    # Timing logic
     deadline = session.start_time + timezone.timedelta(minutes=assessment.duration_minutes)
     read_only = timezone.now() > deadline
 
-    # Variables for managing asynchronous state and results
-    task_id = request.session.get(f'assessment_task_id_{assessment_id}_{question_id}')
+    # ===============================
+    # Multi-language setup
+    # ===============================
+    # Determine selected language (POST wins, else session fallback)
+    if request.method == "POST":
+        selected_lang = request.POST.get("language", "python")
+    else:
+        selected_lang = request.session.get(
+            f'assessment_lang_{assessment_id}_{question_id}',
+            'python'
+        )
+
+    # Define per-language session keys
+    session_code_key = f'assessment_code_{assessment_id}_{question_id}_{selected_lang}'
+    session_task_key = f'assessment_task_id_{assessment_id}_{question_id}_{selected_lang}'
+
+    # Load current task/code if available
+    task_id = request.session.get(session_task_key)
+    code = request.session.get(session_code_key, '')
+
     submission_results = None
     latest_submission = None
 
-    # 1. Handle POST request (Submission)
+    # ===============================
+    # 1️⃣ Handle POST (submission)
+    # ===============================
     if request.method == "POST" and not read_only:
         code = request.POST.get("code", "").strip()
         lang = request.POST.get("language", "python")
-        
+
         if not code:
             messages.error(request, "Code cannot be empty.")
         else:
-            # ⭐ ASYNCHRONOUS CALL: Enqueue the assessment submission task
+            # ⭐ Async submission
             task = process_assessment_submission.delay(
                 request.user.id, assessment.id, current_question_obj.id, code, lang
             )
-            
-            # Store task ID and new code/lang in session
-            request.session[f'assessment_task_id_{assessment_id}_{question_id}'] = task.id
-            request.session['assessment_code'] = code # Store code temporarily in session
-            request.session['assessment_lang'] = lang # Store lang temporarily in session
+
+            # Store per-language info in session (so switching languages restores quickly)
+            request.session[f'assessment_task_id_{assessment_id}_{question_id}_{lang}'] = task.id
+            request.session[f'assessment_code_{assessment_id}_{question_id}_{lang}'] = code
+            request.session[f'assessment_lang_{assessment_id}_{question_id}'] = lang
             request.session.modified = True
-            
+
             messages.info(request, "Submission is being processed in the background.")
-            # Redirect immediately to show loading/pending state
             return redirect('submit_assessment_code', assessment_id=assessment.id, question_id=question_id)
 
-    # 2. Handle GET request (Status Check and Display)
-
-    # First, try to get the latest submission from the database
-    latest_submission = AssessmentSubmission.objects.filter(
-        assessment=assessment, question=current_question_obj, user=request.user
-    ).order_by('-submitted_at').first()
-
+    # ===============================
+    # 2️⃣ Handle GET (status + results)
+    # ===============================
     if task_id:
         task_result = AsyncResult(task_id)
-        
         if task_result.ready():
-            # Task finished, retrieve result and clean up
-            request.session.pop(f'assessment_task_id_{assessment_id}_{question_id}', None)
+            # remove session task id for this language (task finished)
+            request.session.pop(session_task_key, None)
             request.session.modified = True
-            
-            # Re-fetch submission to get the updated status and output from the task
+
+            # Refetch latest submission for this language
             latest_submission = AssessmentSubmission.objects.filter(
-                assessment=assessment, question=current_question_obj, user=request.user
+                assessment=assessment,
+                question=current_question_obj,
+                user=request.user,
+                language=selected_lang
             ).order_by('-submitted_at').first()
-            
+
             if latest_submission and latest_submission.output:
                 try:
-                    # Output field contains JSON list of test results
                     submission_results = json.loads(latest_submission.output)
                 except json.JSONDecodeError:
                     submission_results = None
-                
-                # Set dynamic messages based on the final status
+
                 if latest_submission.score == len(current_question_obj.test_cases):
-                    messages.success(request, "Code Accepted! All test cases passed.")
+                    messages.success(request, "✅ Code Accepted! All test cases passed.")
                 elif latest_submission.error:
-                    messages.error(request, f"Code Execution Error: {latest_submission.error}")
+                    messages.error(request, f"❌ Code Execution Error: {latest_submission.error}")
                 else:
-                    messages.warning(request, "Code Rejected. Some test cases failed.")
+                    messages.warning(request, "⚠️ Some test cases failed.")
         else:
-            # Task is still running
             messages.info(request, f"Submission is processing... Status: {task_result.status}")
 
-    # 3. Prepare data for rendering the template
-    
-    # Load code/lang from latest submission or session (for pending task)
-    code = latest_submission.code if latest_submission else request.session.get('assessment_code', "")
-    lang = latest_submission.language if latest_submission else request.session.get('assessment_lang', 'python')
+    # ===============================
+    # 3️⃣ Load latest code for editor (session-first, then DB filtered by language)
+    # ===============================
+    if not code:
+        latest_submission = AssessmentSubmission.objects.filter(
+            assessment=assessment,
+            question=current_question_obj,
+            user=request.user,
+            language=selected_lang
+        ).order_by('-submitted_at').first()
 
-    is_fully_solved = latest_submission and latest_submission.score == len(current_question_obj.test_cases)
+        if latest_submission:
+            code = latest_submission.code
+            if latest_submission.output and not submission_results:
+                try:
+                    submission_results = json.loads(latest_submission.output)
+                except json.JSONDecodeError:
+                    pass
+
+    # ===============================
+    # 4️⃣ Determine read-only state (robust)
+    #    lock if either deadline passed OR user has full score in ANY language
+    # ===============================
+    # Get best score across all languages for this user/question
+    best_score_agg = AssessmentSubmission.objects.filter(
+        assessment=assessment,
+        question=current_question_obj,
+        user=request.user
+    ).aggregate(best=Max('score'))
+    best_score = (best_score_agg.get('best') or 0)
+
+    is_fully_solved = (best_score == len(current_question_obj.test_cases))
     final_read_only = read_only or is_fully_solved
 
-    # Use existing submission results if available (for page reloads after completion)
-    if latest_submission and not submission_results and latest_submission.output:
-         try:
-            submission_results = json.loads(latest_submission.output)
-         except json.JSONDecodeError:
-            pass
+    # ===============================
+    # 5️⃣ Build user_submissions map (DB + session) so language switching restores instantly
+    # ===============================
+    db_codes = {
+        s.language: s.code
+        for s in AssessmentSubmission.objects.filter(
+            user=request.user,
+            assessment=assessment,
+            question=current_question_obj
+        )
+    }
 
+    session_codes = {}
+    prefix = f'assessment_code_{assessment_id}_{question_id}_'
+    for key, val in request.session.items():
+        if key.startswith(prefix):
+            lang_name = key[len(prefix):]
+            session_codes[lang_name] = val
 
-    # Prepare data for the question navigation bar (kept as is)
+    user_submissions = {**db_codes, **session_codes}
+
+    # ===============================
+    # 6️⃣ Navigation Bar
+    # ===============================
     all_qs = AssessmentQuestion.objects.filter(assessment=assessment).select_related('question').order_by('order')
     nav_questions = []
     for aq in all_qs:
-        sub = AssessmentSubmission.objects.filter(assessment=assessment, question=aq.question, user=request.user).first()
+        sub = AssessmentSubmission.objects.filter(
+            assessment=assessment, question=aq.question, user=request.user
+        ).first()
         is_solved = sub and sub.score == len(aq.question.test_cases)
         is_attempted = sub is not None
         nav_questions.append({
@@ -802,21 +918,26 @@ def submit_assessment_code(request, assessment_id, question_id):
             'is_attempted': is_attempted,
         })
 
+    # ===============================
+    # 7️⃣ Render Context
+    # ===============================
     context = {
         "assessment": assessment,
         "question": current_question_obj,
         "code": code,
-        "selected_language": lang,
+        "selected_language": selected_lang,
         "supported_languages": settings.SUPPORTED_LANGUAGES,
         "read_only": final_read_only,
         "end_time": deadline.isoformat(),
         "all_questions": nav_questions,
         "results": submission_results,
-        "task_id": task_id, # Pass task_id to the template for client-side polling
-        "focus_mode": True, # 👈 ADD THIS LINE
+        "task_id": task_id,
+        "focus_mode": True,
+        "user_submissions": user_submissions,
     }
+
     return render(request, "codingapp/submit_assessment_code.html", context)
-    
+
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import user_passes_test
 from .models import Module
@@ -2257,7 +2378,7 @@ def permissions_manage(request):
         role_permission_map[u.id] = role_perms
         custom_permission_map[u.id] = custom_perms
         combined_permission_map[u.id] = sorted(set(role_perms) | set(custom_perms))
-
+    
     # Handle POST actions
     if request.method == "POST":
         action = request.POST.get("action")
@@ -2332,54 +2453,87 @@ def permissions_manage(request):
 # 🧩 HOD Permission Management View
 # ==============================================================
 from django.db.models import Q
+from django.contrib import messages
+from django.shortcuts import render, redirect
+from django.contrib.auth.decorators import login_required
+from codingapp.models import UserProfile, ActionPermission, Role
+import json
 
 @login_required
 def permissions_hod(request):
-    """HOD page to assign permissions only within their department."""
-    profile = request.user.userprofile
-
-    # Only allow HODs
+    """
+    HOD permission management page — similar to admin, but scoped to HOD's department.
+    Includes search functionality for easier filtering.
+    """
+    profile = getattr(request.user, "userprofile", None)
     if not profile or not profile.role or profile.role.name.lower() != "hod":
         messages.error(request, "You don't have access to this page.")
         return redirect("dashboard")
 
-    # Permissions limited to HOD’s own allowed set
-    permissions = [
-        p for p in profile.get_all_permissions()
-        if ActionPermission.objects.filter(code=p).exists()
-    ]
-    permissions = ActionPermission.objects.filter(code__in=permissions)
+    # Limit scope to users in HOD’s department (excluding self)
+    users = (
+        UserProfile.objects.filter(
+            Q(department=profile.department),
+            ~Q(id=profile.id),  # exclude HOD themselves
+        )
+        .select_related("role", "user", "department")
+        .prefetch_related("custom_permissions", "role__permissions")
+        .order_by("role__name", "user__username")
+    )
 
-    # Only users in the same department (Teachers or Students)
-    department_users = UserProfile.objects.filter(
-        Q(department=profile.department),
-        Q(role__name__in=["teacher", "student"])
-    ).select_related("role", "user")
+    # ✅ Search feature
+    search_query = request.GET.get("search", "").strip()
+    if search_query:
+        users = users.filter(
+            Q(user__username__icontains=search_query)
+            | Q(full_name__icontains=search_query)
+            | Q(user__email__icontains=search_query)
+            | Q(role__name__icontains=search_query)
+        )
 
+    # Permissions the HOD can manage = those the HOD already has
+    allowed_codes = profile.permission_codes()
+    permissions = ActionPermission.objects.filter(code__in=allowed_codes).order_by("code")
+
+    # Build maps for frontend JS
+    role_permission_map, custom_permission_map, combined_permission_map = {}, {}, {}
+    for u in users:
+        role_perms = list(u.role.permissions.values_list("id", flat=True)) if u.role else []
+        custom_perms = list(u.custom_permissions.values_list("id", flat=True))
+        role_permission_map[u.id] = role_perms
+        custom_permission_map[u.id] = custom_perms
+        combined_permission_map[u.id] = sorted(set(role_perms) | set(custom_perms))
+
+    # ✅ Handle permission updates (HOD can edit users in their dept)
     if request.method == "POST":
-        user_id = request.POST.get("user_id")
-        perm_id = request.POST.get("perm_id")
         action = request.POST.get("action")
+        if action == "update_user_perms":
+            user_id = request.POST.get("user_id")
+            perm_ids = request.POST.getlist("perm_ids")
 
-        if user_id and perm_id:
-            user_profile = UserProfile.objects.get(id=user_id)
-            perm = ActionPermission.objects.get(id=perm_id)
-
-            # HOD can assign only if HOD personally has the permission
-            if perm.code not in profile.get_all_permissions():
-                messages.error(request, "You cannot assign a permission you don't have.")
+            try:
+                target_user = UserProfile.objects.get(id=user_id, department=profile.department)
+            except UserProfile.DoesNotExist:
+                messages.error(request, "User not found or not in your department.")
                 return redirect("permissions_hod")
 
-            if action == "add":
-                user_profile.custom_permissions.add(perm)
-            else:
-                user_profile.custom_permissions.remove(perm)
-            messages.success(request, f"Permission '{perm.name}' updated for {user_profile.user.username}.")
+            # Only assign permissions that the HOD also possesses
+            perms = ActionPermission.objects.filter(id__in=perm_ids, code__in=allowed_codes)
+            target_user.custom_permissions.set(perms)
+            target_user.save()
+
+            messages.success(
+                request,
+                f"Updated custom permissions for {target_user.user.username}.",
+            )
             return redirect("permissions_hod")
 
     context = {
         "permissions": permissions,
-        "users": department_users,
+        "users": users,
+        "search_query": search_query,
+        "role_perm_json": json.dumps(role_permission_map),
+        "custom_perm_json": json.dumps(custom_permission_map),
     }
     return render(request, "dashboard/permissions_hod.html", context)
 
@@ -2388,18 +2542,35 @@ def permissions_hod(request):
 # ==============================================================
 from django.db.models import Count
 
+from django.db.models import Count, Q, Prefetch
+from django.contrib import messages
+from django.shortcuts import render, redirect
+from codingapp.models import Department, Role, ActionPermission, UserProfile
+
+
 @login_required
 def admin_control_center(request):
-    """Admin's master control center."""
-    profile = request.user.userprofile
-    if not profile or profile.role.name.lower() != "admin":
+    """Admin's master control center with safe null handling."""
+    profile = getattr(request.user, "userprofile", None)
+    if not profile or not profile.role or profile.role.name.lower() != "admin":
         messages.error(request, "You don’t have access to this page.")
         return redirect("dashboard")
 
-    roles = Role.objects.prefetch_related("permissions").all()
+    # Prefetch safely (avoids N+1)
+    roles = Role.objects.prefetch_related("permissions").order_by("name")
     permissions = ActionPermission.objects.all().order_by("code")
-    departments = Department.objects.prefetch_related("hod").annotate(user_count=Count("userprofile"))
-    users = UserProfile.objects.select_related("role", "department", "user").order_by("user__username")
+
+    # Annotate departments with member count and prefetch related HOD safely
+    departments = (
+        Department.objects.select_related("hod__user")
+        .annotate(user_count=Count("userprofile"))
+        .order_by("name")
+    )
+
+    users = (
+        UserProfile.objects.select_related("role", "department", "user")
+        .order_by("user__username")
+    )
 
     # Count users by role
     role_counts = (

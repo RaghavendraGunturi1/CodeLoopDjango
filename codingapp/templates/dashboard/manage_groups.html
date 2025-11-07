@@ -9,13 +9,18 @@
     <div class="alert alert-info">{{ message }}</div>
   {% endfor %}
 
-  <!-- ADD NEW GROUP -->
+  <!-- ADD / EDIT GROUP CARD -->
   <div class="card mb-4 shadow-sm">
-    <div class="card-header bg-success text-white">
-      <h5 class="mb-0">➕ Add or Edit Group</h5>
+    <div id="groupFormHeader" class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">
+        <span id="formModeIcon">➕</span>
+        <span id="formModeText">Add New Group</span>
+      </h5>
+      <button type="button" id="cancelEditBtn" class="btn btn-sm btn-outline-light d-none" onclick="resetGroupForm()">Cancel Edit</button>
     </div>
+
     <div class="card-body">
-      <form method="POST">
+      <form id="groupForm" method="POST">
         {% csrf_token %}
         <input type="hidden" name="action" value="add_or_edit_group">
         <input type="hidden" name="group_id" id="group_id">
@@ -40,9 +45,11 @@
             <label class="form-label">Assign Students (optional)</label>
             <select name="student_ids" id="student_ids" class="form-select" multiple>
               {% for student in students %}
+                {# student is UserProfile in the view; value is profile.id #}
                 <option value="{{ student.id }}">{{ student.user.username }}</option>
               {% endfor %}
             </select>
+            <small class="text-muted">Use Ctrl / Shift to select multiple</small>
           </div>
 
           <div class="col-md-2">
@@ -74,25 +81,36 @@
             <td>{{ g.name }}</td>
             <td>{{ g.department.name|default:"—" }}</td>
             <td>
-              {% if g.students.count > 0 %}
-                {{ g.students.count }} Student{{ g.students.count|pluralize }}
-                <button class="btn btn-sm btn-outline-info ms-2" type="button" data-bs-toggle="collapse" data-bs-target="#students-{{ g.id }}">
-                  View
-                </button>
-                <ul id="students-{{ g.id }}" class="collapse list-group mt-2">
-                  {% for s in g.students.all %}
-                    <li class="list-group-item py-1">{{ s.username }}</li>
-                  {% endfor %}
-                </ul>
-              {% else %}
-                <span class="text-muted">No students</span>
-              {% endif %}
+              {% with students_count=g.students.count %}
+                {% if students_count > 0 %}
+                  {{ students_count }} Student{{ students_count|pluralize }}
+                  <button class="btn btn-sm btn-outline-info ms-2" type="button" data-bs-toggle="collapse" data-bs-target="#students-{{ g.id }}">
+                    View
+                  </button>
+
+                  <ul id="students-{{ g.id }}" class="collapse list-group mt-2">
+                    {% for user in g.students.all %}
+                      <li class="list-group-item py-1">{{ user.username }}</li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <span class="text-muted">No students</span>
+                {% endif %}
+              {% endwith %}
             </td>
             <td>
               <div class="d-flex gap-2 flex-wrap">
+                
                 <button type="button" class="btn btn-sm btn-outline-warning"
-                        onclick="editGroup({{ g.id }}, {{ g.department.id|default:'null' }}, '{{ g.name|escapejs }}', [{% for s in g.students.all %}{{ s.id }}{% if not forloop.last %}, {% endif %}{% endfor %}])">
-                Edit
+                        onclick="editGroup(
+                          {{ g.id }},
+                          {{ g.department.id|default:'null' }},
+                          '{{ g.name|escapejs }}',
+                          [{% for u in g.students.all %}
+                              {{ u.userprofile.id }}{% if not forloop.last %}, {% endif %}
+                          {% endfor %}]
+                        )">
+                  Edit
                 </button>
 
 
@@ -118,32 +136,77 @@
 
 <!-- ========================= JS ========================= -->
 <script>
-function editGroup(id, name, departmentId) {
-  document.getElementById('group_id').value = id;
-  document.getElementById('group_name').value = name;
-  document.getElementById('department_id').value = departmentId;
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
+/**
+ * Populate the Add/Edit form and switch to "Edit mode".
+ * - id: group id (int)
+ * - departmentId: integer or null
+ * - name: string (escaped)
+ * - studentIds: array of UserProfile ids (ints)
+ */
 function editGroup(id, departmentId, name, studentIds) {
-  // Fill fields safely
   const groupField = document.getElementById('group_id');
   const nameField = document.getElementById('group_name');
   const deptSelect = document.getElementById('department_id');
   const studentSelect = document.getElementById('student_ids');
 
-  if (groupField && nameField && deptSelect && studentSelect) {
-    groupField.value = id;
-    nameField.value = name;
-    deptSelect.value = departmentId ?? '';
+  const header = document.getElementById('groupFormHeader');
+  const modeText = document.getElementById('formModeText');
+  const modeIcon = document.getElementById('formModeIcon');
+  const cancelBtn = document.getElementById('cancelEditBtn');
 
-    // Reset all student options
+  // Fill in data
+  groupField.value = id;
+  nameField.value = name;
+  deptSelect.value = (departmentId === null) ? '' : departmentId;
+
+  // Clear previous selection and set new
+  for (const option of studentSelect.options) {
+    option.selected = studentIds.includes(parseInt(option.value));
+  }
+
+  // Change header color and text to indicate edit mode
+  header.classList.remove('bg-success', 'text-white');
+  header.classList.add('bg-warning', 'text-dark');
+  modeText.textContent = 'Editing Group';
+  modeIcon.textContent = '🖊';
+  cancelBtn.classList.remove('d-none');
+
+  // Smooth scroll to top of form
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/**
+ * Reset form back to Add mode.
+ */
+function resetGroupForm() {
+  const form = document.getElementById('groupForm');
+  if (form) form.reset();
+
+  // Clear hidden field
+  const groupField = document.getElementById('group_id');
+  if (groupField) groupField.value = '';
+
+  // Clear multi-select
+  const studentSelect = document.getElementById('student_ids');
+  if (studentSelect) {
     for (const option of studentSelect.options) {
-      option.selected = studentIds.includes(parseInt(option.value));
+      option.selected = false;
     }
   }
 
-  // Scroll smoothly to the form
+  // Reset header visuals
+  const header = document.getElementById('groupFormHeader');
+  const modeText = document.getElementById('formModeText');
+  const modeIcon = document.getElementById('formModeIcon');
+  const cancelBtn = document.getElementById('cancelEditBtn');
+
+  header.classList.remove('bg-warning', 'text-dark');
+  header.classList.add('bg-success', 'text-white');
+  modeText.textContent = 'Add New Group';
+  modeIcon.textContent = '➕';
+  cancelBtn.classList.add('d-none');
+
+  // Scroll up slightly to show the form clearly
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 </script>

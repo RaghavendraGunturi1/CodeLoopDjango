@@ -428,133 +428,125 @@ def create_profile(sender, instance, created, **kwargs):
             profile.save()
 
 
-# -----------------------------
-# Permission registry & defaults
-# -----------------------------
-# Base/default permissions (merged from previous list + view-derived perms)
-DEFAULT_PERMISSIONS = [
-    # System / General
-    ("view_dashboard", "View Dashboard", "Access the main dashboard"),
-    ("view_profile", "View Profile", "View own profile and info"),
-    ("edit_profile", "Edit Profile", "Update profile details"),
-    ("change_password", "Change Password", "Change user password"),
-    ("view_leaderboard", "View Leaderboard", "Access leaderboard"),
+# ===========================================================
+# 🧩 Unified Permission Registry (Final Version)
+# ===========================================================
 
-    # User & Role Management
-    ("manage_users", "Manage Users", "Create, update, or deactivate users"),
+from django.db.utils import OperationalError, ProgrammingError
+
+
+DEFAULT_PERMISSIONS = [
+    # --- System / Account ---
+    ("view_dashboard", "Access Main Dashboard", "View main dashboard and statistics"),
+    ("view_profile", "View Profile", "View user profile"),
+    ("edit_profile", "Edit Profile", "Edit personal profile"),
+    ("change_password", "Change Password", "Change own password"),
+    ("access_admin_panel", "Access Admin Control Center", "Access global admin tools"),
+    ("manage_permissions", "Manage Permissions", "View and modify user permissions"),
+    ("manage_roles_permissions", "Manage Role Permissions", "Manage which roles have which permissions"),
+    ("manage_users", "Manage Users", "Add, edit, or delete users"),
     ("bulk_edit_users", "Bulk Edit Users", "Edit multiple users at once"),
     ("assign_roles", "Assign Roles", "Assign roles to users"),
-    ("view_user_list", "View User List", "See all users"),
-    ("view_user_detail", "View User Detail", "View individual user info"),
-    ("delete_user", "Delete User", "Delete or disable users"),
-    ("manage_departments", "Manage Departments", "Create/edit departments"),
-    ("assign_hod", "Assign HODs", "Assign Head of Department"),
-    ("manage_roles_permissions", "Manage Roles & Permissions", "Manage role-based permissions"),
-    ("manage_permissions", "Manage Permissions", "Manage permission mappings"),
+    ("delete_user", "Delete User", "Remove a user permanently"),
+    ("reset_passwords", "Reset Passwords", "Reset other users’ passwords"),
+    ("backup_database", "Backup Database", "Export database backup"),
+    ("restore_database", "Restore Database", "Restore database from backup"),
+    ("view_audit_logs", "View Audit Logs", "View system activity logs"),
+    ("system_configuration", "System Configuration", "Edit platform-wide settings"),
 
-    # Department / HOD Controls
-    ("view_department", "View Department", "Access department dashboard"),
+    # --- Departments / HOD / Groups ---
+    ("manage_departments", "Manage Departments", "Create, update, delete departments"),
+    ("view_department", "View Department", "Access a department dashboard"),
+    ("assign_hod", "Assign HOD", "Assign Head of Department"),
     ("manage_teachers", "Manage Teachers", "Edit or remove teachers"),
     ("manage_students", "Manage Students", "Edit or remove students"),
-    ("view_hod_dashboard", "View HOD Dashboard", "Access the HOD dashboard"),
-    ("hod_assign_permissions", "HOD Assign Permissions", "Allow HODs to grant permissions"),
-    ("assign_teacher", "Assign Teachers", "Assign teachers to classes or courses"),
-    ("assign_student", "Assign Students", "Assign students to classes or courses"),
-    ("manage_groups", "Manage Groups", "Create or delete groups (classes/sections)"),
+    ("hod_assign_permissions", "HOD Assign Permissions", "Allow HOD to grant permissions"),
+    ("manage_groups", "Manage Groups", "Create/edit/delete groups (class sections)"),
+    ("assign_group_students", "Assign Group Students", "Assign students to groups"),
 
-    # Modules
-    ("view_modules", "View Modules", "View list of modules"),
-    ("view_module_detail", "View Module Details", "Open module detail"),
-    ("add_module", "Add Module", "Create a new module"),
-    ("edit_module", "Edit Module", "Edit existing module"),
-    ("delete_module", "Delete Module", "Remove a module"),
-    ("mark_module_completed", "Mark Module Completed", "Mark module as completed for a user"),
-    ("add_question_to_module", "Add Question to Module", "Attach question to module"),
-
-    # Questions
-    ("view_questions", "View Questions", "View list of questions"),
-    ("view_question_detail", "View Question Details", "View question detail"),
-    ("add_question", "Add Question", "Create question"),
-    ("edit_question", "Edit Question", "Edit question"),
-    ("delete_question", "Delete Question", "Delete question"),
-    ("execute_code", "Execute Code", "Run code in sandbox"),
-    ("teacher_bulk_upload_mcq", "Bulk Upload MCQ (Teacher)", "Teacher MCQ bulk upload"),
-    ("bulk_mcq_upload", "Bulk Upload MCQ (Admin)", "Admin MCQ bulk upload"),
-
-    # Assessments & Quizzes
-    ("view_assessments", "View Assessments", "View assessments list"),
-    ("view_assessment_detail", "View Assessment Detail", "View assessment details"),
-    ("attempt_assessment_quiz", "Attempt Assessment Quiz", "Student attempt assessment quiz"),
-    ("attempt_assessment_code", "Attempt Assessment Code", "Student attempt coding assessment"),
-    ("view_assessment_leaderboard", "View Assessment Leaderboard", "View assessment leaderboard"),
-    ("export_assessment_leaderboard", "Export Assessment Leaderboard", "Export leaderboard"),
-    ("reset_assessment_submissions", "Reset Assessment Submissions", "Reset submissions for assessment"),
-    ("assessment_result", "View Assessment Result", "View individual assessment result"),
-    ("take_quiz", "Take Quiz", "Student take quiz"),
-    ("view_quiz_result", "View Quiz Result", "View quiz result"),
-    ("view_quiz_leaderboard", "View Quiz Leaderboard", "View quiz leaderboard"),
-    ("create_quiz", "Create Quiz", "Create new quizzes"),
-    ("edit_quiz", "Edit Quiz", "Modify existing quizzes"),
-    ("delete_quiz", "Delete Quiz", "Delete quizzes"),
-    ("view_quiz", "View Quiz", "View quiz details"),
-    ("assign_quiz", "Assign Quiz", "Assign quizzes to students"),
-    ("submit_quiz", "Submit Quiz", "Allow students to submit quizzes"),
-    ("grade_quiz", "Grade Quiz", "Evaluate and assign grades"),
-    ("view_results", "View Results", "View quiz results"),
-    ("reset_quiz_attempt", "Reset Quiz Attempt", "Reset quiz submissions"),
-
-    # Notes / Materials
-    ("upload_notes", "Upload Notes", "Upload study materials"),
+    # --- Modules / Courses / Notes ---
+    ("create_module", "Create Module", "Add a new module"),
+    ("edit_module", "Edit Module", "Modify module details"),
+    ("delete_module", "Delete Module", "Delete module"),
+    ("view_module", "View Module", "View module content"),
+    ("manage_courses", "Manage Courses", "Create or edit courses under modules"),
+    ("add_note", "Add Note", "Upload new study material"),
     ("edit_notes", "Edit Notes", "Modify uploaded notes"),
-    ("delete_notes", "Delete Notes", "Remove notes"),
-    ("view_notes", "View Notes", "Access uploaded notes"),
+    ("delete_notes", "Delete Notes", "Delete uploaded notes"),
+    ("view_notes", "View Notes", "View all notes"),
     ("share_notes", "Share Notes", "Share notes with others"),
-    ("view_uploaded_notes", "View Uploaded Notes", "View available notes"),
 
-    # Notices / Announcements
-    ("view_notices", "View Announcements", "View announcements"),
-    ("add_notice", "Add Announcement", "Create an announcement"),
-    ("edit_notice", "Edit Announcement", "Edit announcement"),
-    ("delete_notice", "Delete Announcement", "Delete announcement"),
-    ("view_announcements", "View Announcements (alias)", "View announcements"),  # alias / compatibility
+    # --- Practice / Questions ---
+    ("create_question", "Create Question", "Add new coding or MCQ question"),
+    ("edit_question", "Edit Question", "Edit question details"),
+    ("delete_question", "Delete Question", "Delete question"),
+    ("view_question", "View Question", "View practice or exam question"),
+    ("bulk_mcq_upload", "Bulk MCQ Upload", "Upload MCQs in bulk"),
+    ("manage_practice_results", "Manage Practice Results", "View or reset practice submissions"),
 
-    # Courses & Content
-    ("create_course", "Create Course", "Create courses"),
-    ("edit_course", "Edit Course", "Edit courses"),
-    ("delete_course", "Delete Course", "Delete courses"),
-    ("manage_courses", "Manage Courses", "Course management"),
-    ("view_course_content", "View Course Content", "View content"),
-    ("manage_course_content", "Manage Course Content", "Manage content"),
+    # --- Quizzes / Assessments ---
+    ("create_quiz", "Create Quiz", "Create a new quiz"),
+    ("edit_quiz", "Edit Quiz", "Modify quiz settings"),
+    ("delete_quiz", "Delete Quiz", "Delete a quiz"),
+    ("view_quiz", "View Quiz", "View quiz information"),
+    ("assign_quiz", "Assign Quiz", "Assign quizzes to students"),
+    ("submit_quiz", "Submit Quiz", "Submit quiz responses"),
+    ("grade_quiz", "Grade Quiz", "Evaluate quiz submissions"),
+    ("view_results", "View Results", "View assessment or quiz results"),
+    ("reset_quiz_attempt", "Reset Quiz Attempt", "Reset a student’s quiz attempt"),
 
-    # Teacher-specific
-    ("teacher_dashboard", "Access Teacher Dashboard", "Teacher dashboard"),
-    ("teacher_manage_modules", "Manage Modules (Teacher)", "Teacher module management"),
-    ("teacher_manage_questions", "Manage Questions (Teacher)", "Teacher question management"),
-    ("teacher_manage_assessments", "Manage Assessments (Teacher)", "Teacher assessment management"),
-    ("teacher_manage_groups", "Manage Groups (Teacher)", "Teacher group management"),
-    ("teacher_manage_quizzes", "Manage Quizzes (Teacher)", "Teacher quiz management"),
-    ("teacher_manage_courses", "Manage Courses (Teacher)", "Teacher course management"),
-    ("manage_groups", "Manage Groups", "Create or delete groups (classes/sections)"),
+    # --- Courses ---
+    ("create_course", "Create Course", "Add a new course"),
+    ("edit_course", "Edit Course", "Edit course details"),
+    ("delete_course", "Delete Course", "Delete course"),
+    ("view_course", "View Course", "View course content"),
 
-    # Analytics / Performance
-    ("view_student_performance", "View Student Performance", "View student analytics"),
-    ("view_student_detail", "View Student Detail", "View student details"),
-    ("export_student_performance", "Export Student Performance", "Export performance data"),
+    # --- Notices / Announcements ---
+    ("add_notice", "Add Notice", "Post an announcement"),
+    ("edit_notice", "Edit Notice", "Edit an announcement"),
+    ("delete_notice", "Delete Notice", "Delete announcement"),
+    ("view_notice", "View Notice", "View announcements"),
+    ("view_announcements", "View Announcements", "Access announcements feed"),
+    ("post_feedback", "Post Feedback", "Submit feedback or suggestions"),
 
-    # System / Admin
-    ("access_admin_panel", "Access Admin Panel", "Access the Admin Control Center"),
-    ("system_configuration", "System Configuration", "Change platform settings"),
-    ("system_settings", "System Settings", "Edit system settings"),
-    ("view_audit_logs", "View Audit Logs", "View recent user actions"),
-    ("backup_database", "Backup Database", "Create database backups"),
-    ("restore_database", "Restore Database", "Restore database backups"),
-    ("delete_anything", "Delete Any Object", "Delete any record (superuser only)"),
-
-    # Misc / API-like
-    ("run_code", "Run Code API", "Run code in sandbox"),
-    ("clear_splash_flag", "Clear Splash Flag", "Clear splash screen"),
-    ("check_submission_status", "Check Submission Status", "Check submission status endpoint"),
+    # --- Performance / Reports ---
+    ("view_performance", "View Performance", "View student performance data"),
+    ("export_performance_data", "Export Performance Data", "Export reports"),
+    ("view_leaderboard", "View Leaderboard", "View ranking lists"),
 ]
+
+
+ROLE_DEFAULT_PERMISSIONS = {
+    "admin": ["*"],  # all permissions
+
+    "hod": [
+        "view_dashboard", "view_profile", "edit_profile", "change_password",
+        "view_department", "manage_teachers", "manage_students", "assign_roles",
+        "manage_permissions", "manage_roles_permissions", "manage_groups",
+        "assign_group_students", "create_module", "edit_module", "view_module",
+        "create_quiz", "edit_quiz", "delete_quiz", "assign_quiz", "grade_quiz",
+        "view_results", "add_note", "edit_notes", "delete_notes", "view_notes",
+        "add_notice", "edit_notice", "delete_notice", "view_notice",
+        "view_performance", "hod_assign_permissions", "view_announcements",
+        "post_feedback"
+    ],
+
+    "teacher": [
+        "view_dashboard", "view_profile", "edit_profile", "change_password",
+        "create_module", "edit_module", "view_module", "create_question",
+        "edit_question", "view_question", "create_quiz", "edit_quiz",
+        "assign_quiz", "grade_quiz", "view_results", "add_note", "edit_notes",
+        "view_notes", "manage_groups", "assign_group_students", "view_notice",
+        "view_announcements", "post_feedback"
+    ],
+
+    "student": [
+        "view_dashboard", "view_profile", "edit_profile", "change_password",
+        "view_module", "view_question", "submit_quiz", "view_results",
+        "view_notes", "view_notice", "view_announcements", "post_feedback",
+        "view_leaderboard"
+    ],
+}
 
 
 def ensure_default_permissions():
@@ -569,62 +561,40 @@ def ensure_default_permissions():
         # Database not ready (e.g., during migrate)
         pass
 
+def sync_permissions():
+    """Synchronize permission definitions and assign to roles."""
+    from codingapp.models import Role, ActionPermission
 
-# ===========================================================
-# Default role permission mapping
-# ===========================================================
-ROLE_DEFAULT_PERMISSIONS = {
-    "admin": ["*"],
+    try:
+        # 1️⃣ Create or update all defined permissions
+        created_count = 0
+        for code, name, desc in DEFAULT_PERMISSIONS:
+            perm, created = ActionPermission.objects.get_or_create(
+                code=code,
+                defaults={"name": name, "description": desc},
+            )
+            if not created and (perm.name != name or perm.description != desc):
+                perm.name, perm.description = name, desc
+                perm.save()
+            if created:
+                created_count += 1
 
-    "hod": [
-        # General
-        "view_dashboard", "view_profile", "edit_profile", "view_leaderboard", "view_notices", "view_announcements",
-        "add_notice", "edit_notice", "delete_notice",
+        print(f"✅ Synced {len(DEFAULT_PERMISSIONS)} permissions ({created_count} new).")
 
-        # Users / Departments / Roles
-        "manage_departments", "manage_teachers", "manage_students", "manage_users", "bulk_edit_users",
-        "assign_roles", "assign_hod", "manage_roles_permissions", "manage_permissions", "hod_assign_permissions",
+        # 2️⃣ Assign permissions to roles
+        for role_name, perm_codes in ROLE_DEFAULT_PERMISSIONS.items():
+            role, _ = Role.objects.get_or_create(name=role_name)
+            if "*" in perm_codes:
+                perms = ActionPermission.objects.all()
+            else:
+                perms = ActionPermission.objects.filter(code__in=perm_codes)
+            role.permissions.set(perms)
+            role.save()
+            print(f"🎯 Assigned {len(perms)} permissions to {role_name.title()}.")
 
-        # Modules & Questions
-        "view_modules", "view_module_detail", "add_module", "edit_module", "delete_module",
-        "add_question_to_module", "view_questions", "add_question", "edit_question", "delete_question",
-
-        # Assessments & Quizzes
-        "view_assessments", "view_assessment_detail", "create_quiz", "edit_quiz", "delete_quiz", "view_quiz",
-        "assign_quiz", "grade_quiz", "view_results", "view_quiz_leaderboard", "reset_assessment_submissions",
-        "export_assessment_leaderboard", "assessment_result",
-
-        # Notes & Content
-        "upload_notes", "edit_notes", "delete_notes", "view_notes", "view_uploaded_notes",
-
-        # Analytics
-        "view_student_performance", "view_student_detail", "export_student_performance",
-    ],
-
-    "teacher": [
-        "view_dashboard", "view_profile", "edit_profile", "view_leaderboard", "view_notices",
-        # Modules / Questions
-        "view_modules", "view_module_detail", "add_module", "edit_module", "delete_module",
-        "view_questions", "add_question", "edit_question", "delete_question", "teacher_bulk_upload_mcq", "execute_code",
-        # Assessments / Quizzes
-        "teacher_manage_assessments", "teacher_manage_quizzes", "view_assessments", "view_assessment_detail",
-        "take_quiz", "view_quiz_result", "view_quiz_leaderboard", "assessment_result", "reset_assessment_submissions",
-        "view_results",
-        # Notes
-        "upload_notes", "edit_notes", "delete_notes", "view_notes",
-    ],
-
-    "student": [
-        "view_dashboard", "view_profile", "edit_profile",
-        "view_modules", "view_module_detail",
-        "view_questions", "view_question_detail",
-        "execute_code",
-        "take_quiz", "attempt_assessment_quiz", "attempt_assessment_code",
-        "view_quiz_result", "view_assessment_leaderboard", "assessment_result",
-        "view_notes", "view_notices", "view_uploaded_notes", "post_feedback",
-    ],
-}
-
+    except (OperationalError, ProgrammingError):
+        # Database not ready (e.g., during migrate)
+        print("⚠️ Skipped sync_permissions: database not ready.")
 
 def assign_default_permissions_to_roles():
     """
