@@ -25,6 +25,9 @@ from .models import (
 from .forms import ModuleForm, QuestionForm
 from codingapp import models
 from codingapp.models import Department, Role, ActionPermission, UserProfile
+from codingapp.utils import get_user_accessible_groups
+from codingapp.utils import is_teacher, is_hod, is_admin, has_role
+
 
 
 # Piston (code execution) API endpoint
@@ -209,11 +212,8 @@ from .forms import ModuleForm, QuestionForm
 
 @login_required
 def module_list(request):
-    if request.user.is_staff:
-        mods = Module.objects.all()
-    else:
-        user_groups = request.user.custom_groups.all()
-        mods = Module.objects.filter(groups__in=user_groups).distinct()
+    accessible_groups = get_user_accessible_groups(request.user)
+    mods = Module.objects.filter(groups__in=accessible_groups).distinct()
     return render(request, 'codingapp/module_list.html', {'modules': mods})
 
 
@@ -222,7 +222,9 @@ from .models import ModuleCompletion  # make sure this is imported
 @login_required
 def module_detail(request, module_id):
     module = get_object_or_404(Module, id=module_id)
-
+    denied = deny_access_if_not_allowed(request, module)
+    if denied: 
+        return denied
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
         if not module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
@@ -251,15 +253,19 @@ def module_detail(request, module_id):
     })
 
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def add_module(request):
     form = ModuleForm(request.POST or None)
+    if not request.user.is_staff:
+        form.fields['groups'].queryset = request.user.custom_groups.all()
+    else:
+        form.fields['groups'].queryset = Group.objects.all()
     if form.is_valid():
         form.save()
         return redirect("module_list")
     return render(request, "codingapp/module_form.html", {"form": form})
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def edit_module(request, module_id):
     mod = get_object_or_404(Module, id=module_id)
     form = ModuleForm(request.POST or None, instance=mod)
@@ -268,7 +274,7 @@ def edit_module(request, module_id):
         return redirect("module_list")
     return render(request, "codingapp/module_form.html", {"form": form})
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def delete_module(request, module_id):
     mod = get_object_or_404(Module, id=module_id)
     if request.method == "POST":
@@ -278,12 +284,10 @@ def delete_module(request, module_id):
 
 @login_required
 def question_list(request):
-    if request.user.is_staff:
-        qs = Question.objects.filter(question_type="coding")
-    else:
-        user_groups = request.user.custom_groups.all()
-        modules = Module.objects.filter(groups__in=user_groups).distinct()
-        qs = Question.objects.filter(module__in=modules).distinct()
+    accessible_groups = get_user_accessible_groups(request.user)
+    modules = Module.objects.filter(groups__in=accessible_groups).distinct()
+    qs = Question.objects.filter(module__in=modules, question_type="coding").distinct()
+
     return render(request, 'codingapp/question_list.html', {'questions': qs})
 
 
@@ -294,6 +298,9 @@ def question_detail(request, pk):
     from django.conf import settings
 
     q = get_object_or_404(Question, pk=pk)
+    denied = deny_access_if_not_allowed(request, q.module)
+    if denied:
+        return denied
 
     # --- Access control ---
     if not request.user.is_staff:
@@ -470,7 +477,7 @@ def mark_module_completed(request, module_id):
 from .forms import QuestionForm, TestCaseForm
 from django.forms import formset_factory
 from django.contrib.admin.views.decorators import staff_member_required
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def add_question_to_module(request, module_id):
     mod = get_object_or_404(Module, id=module_id)
     TestCaseFormSet = formset_factory(TestCaseForm, extra=1, can_delete=True)
@@ -521,11 +528,9 @@ from django.utils import timezone
 @login_required
 def assessment_list(request):
     now = timezone.now()
-    if request.user.is_staff:
-        asses = Assessment.objects.filter(end_time__gte=now)
-    else:
-        user_groups = request.user.custom_groups.all()
-        asses = Assessment.objects.filter(end_time__gte=now, groups__in=user_groups).distinct()
+    accessible_groups = get_user_accessible_groups(request.user)
+    asses = Assessment.objects.filter(end_time__gte=now, groups__in=accessible_groups).distinct()
+
     return render(request, 'codingapp/assessment_list.html', {"assessments": asses})
 
 from django.shortcuts import render, get_object_or_404, redirect
@@ -748,6 +753,9 @@ def submit_assessment_code(request, assessment_id, question_id):
     from django.db.models import Max
 
     assessment = get_object_or_404(Assessment, id=assessment_id)
+    denied = deny_access_if_not_allowed(request, assessment)
+    if denied:
+        return denied
     current_question_obj = get_object_or_404(Question, id=question_id)
 
     # ✅ Permission check (unchanged)
@@ -943,10 +951,8 @@ from django.contrib.auth.decorators import user_passes_test
 from .models import Module
 from .forms import ModuleForm
 
-def is_teacher(user):
-    return user.is_staff or user.groups.filter(name="Teachers").exists()
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_module_list(request):
     modules = Module.objects.all()
     return render(request, 'codingapp/teacher_module_list.html', {'modules': modules})
@@ -957,7 +963,7 @@ from django.forms import inlineformset_factory
 from .models import Module, Question
 from .forms import ModuleForm, QuestionForm
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_add_module(request):
     # Inline formset for questions (no instance yet, so use 'None')
     QuestionFormSet = inlineformset_factory(
@@ -997,7 +1003,7 @@ from django.forms import inlineformset_factory
 from .models import Module, Question
 from .forms import ModuleForm, QuestionForm
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_edit_module(request, module_id):
     module = get_object_or_404(Module, id=module_id)
     
@@ -1027,7 +1033,7 @@ def teacher_edit_module(request, module_id):
         "module": module,
     })
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_delete_module(request, module_id):
     module = get_object_or_404(Module, id=module_id)
     if request.method == "POST":
@@ -1035,7 +1041,7 @@ def teacher_delete_module(request, module_id):
         return redirect('teacher_module_list')
     return render(request, 'codingapp/teacher_module_confirm_delete.html', {'module': module})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_dashboard(request):
     # You can add stats, recent activity, etc.
     return render(request, 'codingapp/teacher_dashboard.html')
@@ -1043,7 +1049,7 @@ def teacher_dashboard(request):
 from .models import Question
 from .forms import QuestionForm
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_question_list(request):
     questions = Question.objects.filter()
     return render(request, 'codingapp/teacher_question_list.html', {'questions': questions})
@@ -1056,7 +1062,7 @@ from .models import Question
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render, redirect, get_object_or_404
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_question_form(request, question_id=None):
     question = get_object_or_404(Question, id=question_id) if question_id else None
 
@@ -1103,7 +1109,7 @@ def teacher_question_form(request, question_id=None):
     })
 
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_delete_question(request, question_id):
     question = get_object_or_404(Question, id=question_id)
     if request.method == "POST":
@@ -1114,7 +1120,7 @@ def teacher_delete_question(request, question_id):
 from .models import Assessment
 from .forms import AssessmentForm  # You'll need to create this form
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_assessment_list(request):
     assessments = Assessment.objects.all()
     return render(request, 'codingapp/teacher_assessment_list.html', {'assessments': assessments})
@@ -1124,10 +1130,8 @@ from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import user_passes_test
 from .models import Assessment, AssessmentQuestion # It's good practice to import models you work with
 
-def is_teacher(user):
-    return user.is_staff
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_add_assessment(request):
     if request.method == "POST":
         form = AssessmentForm(request.POST)
@@ -1150,7 +1154,7 @@ def teacher_add_assessment(request):
         
     return render(request, 'codingapp/teacher_assessment_form.html', {'form': form, 'action': 'Add'})
     
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_edit_assessment(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
     if request.method == "POST":
@@ -1188,7 +1192,7 @@ def teacher_edit_assessment(request, assessment_id):
         'assessment': assessment
     })
     
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_delete_assessment(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
     if request.method == "POST":
@@ -1199,12 +1203,12 @@ def teacher_delete_assessment(request, assessment_id):
 from .models import Group
 from .forms import GroupForm
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_group_list(request):
     groups = Group.objects.all()
     return render(request, 'codingapp/teacher_group_list.html', {'groups': groups})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_add_group(request):
     if request.method == "POST":
         form = GroupForm(request.POST)
@@ -1215,7 +1219,7 @@ def teacher_add_group(request):
         form = GroupForm()
     return render(request, 'codingapp/teacher_group_form.html', {'form': form, 'action': 'Add'})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_edit_group(request, group_id):
     group = get_object_or_404(Group, id=group_id)
     if request.method == "POST":
@@ -1227,7 +1231,7 @@ def teacher_edit_group(request, group_id):
         form = GroupForm(instance=group)
     return render(request, 'codingapp/teacher_group_form.html', {'form': form, 'action': 'Edit'})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_delete_group(request, group_id):
     group = get_object_or_404(Group, id=group_id)
     if request.method == "POST":
@@ -1421,10 +1425,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from .models import Question
 
-def is_teacher(user):
-    return user.is_staff or user.groups.filter(name="Teachers").exists()
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_bulk_upload_mcq(request):
     if request.method == 'POST' and request.FILES.get('excel_file'):
         excel_file = request.FILES['excel_file']
@@ -1496,22 +1498,16 @@ from django.shortcuts import render, redirect, get_object_or_404
 from .models import Quiz
 from .forms import QuizForm
 
-def is_teacher(user):
-    return user.is_staff or user.groups.filter(name='Teachers').exists()
-
 from .models import Quiz
 from .forms import QuizForm
 from django.contrib.auth.decorators import user_passes_test
 
-def is_teacher(user):
-    return user.is_staff or user.groups.filter(name='Teachers').exists()
-
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_quiz_list(request):
     quizzes = Quiz.objects.filter(created_by=request.user)
     return render(request, 'codingapp/teacher_quiz_list.html', {'quizzes': quizzes})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_quiz_create(request):
     if request.method == "POST":
         form = QuizForm(request.POST)
@@ -1525,7 +1521,7 @@ def teacher_quiz_create(request):
         form = QuizForm()
     return render(request, 'codingapp/teacher_quiz_form.html', {'form': form, 'action': 'Create'})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_quiz_edit(request, quiz_id):
     quiz = get_object_or_404(Quiz, id=quiz_id, created_by=request.user)
     if request.method == "POST":
@@ -1537,7 +1533,7 @@ def teacher_quiz_edit(request, quiz_id):
         form = QuizForm(instance=quiz)
     return render(request, 'codingapp/teacher_quiz_form.html', {'form': form, 'action': 'Edit'})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_quiz_delete(request, quiz_id):
     quiz = get_object_or_404(Quiz, id=quiz_id, created_by=request.user)
     if request.method == "POST":
@@ -1585,61 +1581,78 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Q
 from .models import Note
 
+from codingapp.utils import is_teacher, is_hod, is_admin  # make sure this import exists
+
+
 @login_required
 def notes_list(request):
-    user_groups = request.user.custom_groups.all()
-    notes = Note.objects.filter(
-        Q(group__in=user_groups) | Q(group__isnull=True)
-    ).distinct()
-    return render(request, 'codingapp/notes_list.html', {'notes': notes})
+    """
+    Students see only notes from their groups.
+    Teachers/HOD/Admins see all notes from their department.
+    """
+    accessible_groups = get_user_accessible_groups(request.user)
 
+    # Teachers, HODs, Admins can see all notes for groups they manage
+    notes = Note.objects.filter(
+        Q(group__in=accessible_groups) | Q(group__isnull=True)
+    ).distinct()
+
+    can_manage_notes = is_teacher(request.user) or is_hod(request.user) or is_admin(request.user)
+
+    return render(request, "codingapp/notes_list.html", {
+        "notes": notes,
+        "can_manage_notes": can_manage_notes,
+    })
 
 
 @login_required
 def add_note(request):
-    if not request.user.is_staff:
+    if not (is_teacher(request.user) or is_hod(request.user) or is_admin(request.user)):
+        messages.error(request, "You do not have permission to upload study materials.")
         return redirect('notes_list')
+
     form = NoteForm(request.POST or None, request.FILES or None)
     if form.is_valid():
         note = form.save(commit=False)
         note.uploaded_by = request.user
         note.save()
+        messages.success(request, "Note uploaded successfully.")
         return redirect('notes_list')
-    return render(request, 'codingapp/add_note.html', {'form': form})
 
-from django.shortcuts import get_object_or_404
-from django.contrib import messages
+    return render(request, "codingapp/add_note.html", {'form': form})
+
 
 @login_required
 def edit_note(request, note_id):
-    note = get_object_or_404(Note, id=note_id, uploaded_by=request.user)
-    if request.method == 'POST':
-        form = NoteForm(request.POST, request.FILES, instance=note)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "Note updated successfully.")
-            return redirect('notes_list')
-    else:
-        form = NoteForm(instance=note)
-    return render(request, 'codingapp/add_note.html', {'form': form, 'edit_mode': True})
+    note = get_object_or_404(Note, id=note_id)
+
+    if not (is_teacher(request.user) or is_hod(request.user) or is_admin(request.user)) or note.uploaded_by != request.user:
+        messages.error(request, "You cannot edit this note.")
+        return redirect('notes_list')
+
+    form = NoteForm(request.POST or None, request.FILES or None, instance=note)
+    if form.is_valid():
+        form.save()
+        messages.success(request, "Note updated successfully.")
+        return redirect('notes_list')
+
+    return render(request, "codingapp/add_note.html", {'form': form, 'edit_mode': True})
 
 
 @login_required
 def delete_note(request, note_id):
-    note = get_object_or_404(Note, id=note_id, uploaded_by=request.user)
+    note = get_object_or_404(Note, id=note_id)
+
+    if not (is_teacher(request.user) or is_hod(request.user) or is_admin(request.user)) or note.uploaded_by != request.user:
+        messages.error(request, "You cannot delete this note.")
+        return redirect('notes_list')
+
     if request.method == 'POST':
         note.delete()
         messages.success(request, "Note deleted successfully.")
         return redirect('notes_list')
-    return render(request, 'codingapp/confirm_delete_note.html', {'note': note})
 
-
-from .models import Notice, NoticeReadStatus
-from .forms import NoticeForm
-from django.contrib.auth.decorators import login_required, user_passes_test
-from django.shortcuts import render, redirect, get_object_or_404
-from django.utils import timezone
-from django.db.models import Q
+    return render(request, "codingapp/confirm_delete_note.html", {'note': note})
 
 
 # List all notices for current user (group/for_everyone)
@@ -1809,9 +1822,6 @@ from .models import Course
 from .forms import CourseForm, CourseContentFormSet
 from django.contrib.auth.decorators import login_required, user_passes_test
 
-def is_teacher(user):
-    return user.is_staff  # or use a custom check
-
 from django.db.models import Q
 from codingapp.models import Course, Group  # ✅ Make sure this is your model
 from django.contrib.auth.decorators import login_required
@@ -1827,6 +1837,9 @@ def course_list(request):
 @login_required
 def course_detail(request, pk):
     course = get_object_or_404(Course, pk=pk)
+    denied = deny_access_if_not_allowed(request, course)
+    if denied:
+        return denied
     # Check access
     if not course.is_public and not course.groups.filter(id__in=request.user.group_set.values_list('id', flat=True)).exists():
         return render(request, 'codingapp/courses/denied.html')
@@ -1840,7 +1853,7 @@ def course_detail(request, pk):
 
 
 @login_required
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def create_course(request):
     if request.method == 'POST':
         form = CourseForm(request.POST)
@@ -1871,14 +1884,14 @@ def create_course(request):
 from django.contrib import messages
 
 @login_required
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def manage_courses(request):
     courses = Course.objects.filter(created_by=request.user)
     return render(request, 'codingapp/courses/manage.html', {'courses': courses})
 
 
 @login_required
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def edit_course(request, pk):
     course = get_object_or_404(Course, pk=pk, created_by=request.user)
 
@@ -1917,7 +1930,7 @@ def edit_course(request, pk):
 
 
 @login_required
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def delete_course(request, pk):
     course = get_object_or_404(Course, pk=pk, created_by=request.user)
     if request.method == 'POST':
@@ -1987,77 +2000,118 @@ def run_code_view(request):
 
 
 
+from django.db.models import Avg, Q
 from django.contrib.auth.decorators import login_required, user_passes_test
-from django.db.models import Avg
 from django.shortcuts import render
 from django.contrib.auth.models import User
-from codingapp.models import Submission, QuizSubmission, Group, Module, ModuleCompletion
+from codingapp.models import Submission, QuizSubmission, Module, ModuleCompletion, Group, UserProfile
+from codingapp.utils import get_user_accessible_groups
+from codingapp.utils import is_teacher, is_hod, is_admin
+from codingapp.utils import get_user_accessible_groups
+
 
 @login_required
-@user_passes_test(lambda u: u.is_staff)
 def student_performance_list(request):
-    selected_group_id = request.GET.get('group')
-    search_query = request.GET.get('q', '')
-    sort_key = request.GET.get('sort', 'username')
+    """
+    Shows performance data for students accessible to the current user:
+    - Admin → all students
+    - HOD → students in their department
+    - Teacher → students in their assigned groups
+    """
+    accessible_groups = get_user_accessible_groups(request.user)
+    profile = getattr(request.user, "userprofile", None)
+    role_name = profile.role.name.lower() if profile and profile.role else "unknown"
 
-    students = User.objects.filter(is_staff=False)
+    selected_group_id = request.GET.get("group")
+    search_query = request.GET.get("q", "")
+    sort_key = request.GET.get("sort", "username")
+
+    # 🔹 Get student queryset
+    if role_name == "admin":
+        students = User.objects.filter(is_staff=False)
+    else:
+        students = User.objects.filter(
+            is_staff=False,
+            id__in=Group.objects.filter(id__in=accessible_groups).values_list("students__id", flat=True)
+        )
+
     if selected_group_id:
         students = students.filter(groups__id=selected_group_id)
     if search_query:
-        students = students.filter(username__icontains=search_query)
+        students = students.filter(
+            Q(username__icontains=search_query)
+            | Q(userprofile__full_name__icontains=search_query)
+        )
+
+    students = students.distinct()
 
     total_modules = Module.objects.count()
     performance_data = []
 
     for student in students:
-        coding_submissions = Submission.objects.filter(user=student)
-        quiz_submissions = QuizSubmission.objects.filter(user=student)
+        # Groups that teacher/HOD can access for this student
+        student_groups = Group.objects.filter(students=student, id__in=accessible_groups)
 
-        total_coding = coding_submissions.count()
-        accepted_coding = coding_submissions.filter(status='Accepted').count()
+        # ✅ Coding Submissions (modules linked to accessible groups)
+        student_submissions = Submission.objects.filter(
+            user=student,
+            question__module__groups__in=student_groups
+        ).distinct()
+
+        # ✅ Quiz Submissions (via Assessments linked to accessible groups)
+        accessible_assessments = Assessment.objects.filter(groups__in=student_groups).distinct()
+        quiz_submissions = QuizSubmission.objects.filter(
+            user=student,
+            quiz__in=accessible_assessments.values_list("quiz_id", flat=True)
+        ).distinct()
+
+        # ✅ Completed Modules (within accessible groups)
+        completed_modules = ModuleCompletion.objects.filter(
+            user=student,
+            module__groups__in=student_groups,
+            completed=True
+        ).distinct()
+
+        total_coding = student_submissions.count()
+        accepted_coding = student_submissions.filter(status="Accepted").count()
         total_quizzes = quiz_submissions.count()
-        avg_quiz_score = quiz_submissions.aggregate(avg=Avg('score'))['avg'] or 0
-
-        # ✅ Correct usage for completed modules
-        completed_modules = ModuleCompletion.objects.filter(user=student, completed=True).count()
+        avg_quiz_score = quiz_submissions.aggregate(avg=Avg("score"))["avg"] or 0
 
         performance_data.append({
-            'student': student,
-            'total_coding': total_coding,
-            'accepted_coding': accepted_coding,
-            'total_quizzes': total_quizzes,
-            'avg_quiz_score': round(avg_quiz_score, 2),
-            'completed_modules': completed_modules,
-            'total_modules': total_modules,
+            "student": student,
+            "total_coding": total_coding,
+            "accepted_coding": accepted_coding,
+            "total_quizzes": total_quizzes,
+            "avg_quiz_score": round(avg_quiz_score, 2),
+            "completed_modules": completed_modules.count(),
+            "total_modules": total_modules,
         })
 
-    # ✅ Sorting
-    if sort_key == 'submissions':
-        performance_data.sort(key=lambda x: x['total_coding'], reverse=True)
-    elif sort_key == 'accepted':
-        performance_data.sort(key=lambda x: x['accepted_coding'], reverse=True)
-    elif sort_key == 'quizzes':
-        performance_data.sort(key=lambda x: x['total_quizzes'], reverse=True)
-    elif sort_key == 'score':
-        performance_data.sort(key=lambda x: x['avg_quiz_score'], reverse=True)
-    elif sort_key == 'top_performer':
-        performance_data.sort(
-            key=lambda x: (x['accepted_coding'] + x['avg_quiz_score'] + x['completed_modules']),
-            reverse=True
-        )
+    # ✅ Sorting logic
+    sort_map = {
+        "submissions": lambda x: x["total_coding"],
+        "accepted": lambda x: x["accepted_coding"],
+        "quizzes": lambda x: x["total_quizzes"],
+        "score": lambda x: x["avg_quiz_score"],
+        "top_performer": lambda x: (
+            x["accepted_coding"] + x["avg_quiz_score"] + x["completed_modules"]
+        ),
+    }
+    if sort_key in sort_map:
+        performance_data.sort(key=sort_map[sort_key], reverse=True)
     else:
-        performance_data.sort(key=lambda x: x['student'].username.lower())
+        performance_data.sort(key=lambda x: x["student"].username.lower())
 
-    groups = Group.objects.all()
+    groups = accessible_groups
 
-    return render(request, 'codingapp/student_performance_list.html', {
-        'performance_data': performance_data,
-        'groups': groups,
-        'selected_group_id': selected_group_id,
-        'search_query': search_query,
-        'sort_key': sort_key,
+    return render(request, "codingapp/student_performance_list.html", {
+        "performance_data": performance_data,
+        "groups": groups,
+        "selected_group_id": selected_group_id,
+        "search_query": search_query,
+        "sort_key": sort_key,
+        "role_name": role_name,
     })
-
 
 from django.http import HttpResponse
 from django.contrib.auth.models import User
@@ -2065,27 +2119,82 @@ from django.db.models import Count
 from .models import Submission, QuizSubmission, Module
 from django.contrib.auth.decorators import login_required, user_passes_test
 
-def is_teacher(user):
-    return user.is_staff or user.groups.filter(name='Teachers').exists()
+
+from django.contrib.auth.decorators import login_required, user_passes_test
+from django.shortcuts import render, get_object_or_404
+from django.http import HttpResponse
+from django.db.models import Q
+from codingapp.models import (
+    Submission, QuizSubmission, Module, ModuleCompletion,
+    Group, UserProfile, Assessment
+)
+from codingapp.utils import get_user_accessible_groups
+
+from codingapp.utils import is_teacher, is_hod, is_admin
+from codingapp.utils import get_user_accessible_groups
+
 
 @login_required
-@user_passes_test(is_teacher)
 def student_performance_detail(request, student_id):
-    try:
-        student = User.objects.get(pk=student_id, is_staff=False)
-    except User.DoesNotExist:
-        return HttpResponse("Student not found.", status=404)
+    """
+    Shows a detailed performance dashboard for a single student:
+    - Admin → all students
+    - HOD → students in their department
+    - Teacher → students in their assigned groups
+    """
 
-    coding_submissions = Submission.objects.filter(user=student).order_by('-submitted_at')
-    quiz_submissions = QuizSubmission.objects.filter(user=student).order_by('-submitted_at')
+    profile = getattr(request.user, "userprofile", None)
+    role_name = profile.role.name.lower() if profile and profile.role else "unknown"
+    accessible_groups = get_user_accessible_groups(request.user)
 
-    # Module-wise progress calculation
+    # 🔹 Get the target student profile
+    student_profile = get_object_or_404(UserProfile, id=student_id)
+    student_user = student_profile.user
+
+    # --- Permission Check ---
+    if role_name == "hod":
+        if student_profile.department_id != profile.department_id:
+            return HttpResponse("Access denied: Student not in your department.", status=403)
+    elif role_name == "teacher":
+        teacher_groups = Group.objects.filter(teachers=request.user)
+        if not Group.objects.filter(id__in=teacher_groups, students=student_user).exists():
+            return HttpResponse("Access denied: Student not in your assigned groups.", status=403)
+
+    # 🔹 Determine which groups the student belongs to (that the teacher/admin can access)
+    student_groups = Group.objects.filter(students=student_user, id__in=accessible_groups)
+
+    # ✅ Coding submissions (modules in these groups)
+    coding_submissions = (
+        Submission.objects.filter(
+            user=student_user,
+            question__module__groups__in=student_groups
+        )
+        .select_related("question")
+        .distinct()
+        .order_by("-submitted_at")
+    )
+
+    # ✅ Quiz submissions (via assessments linked to those groups)
+    accessible_assessments = Assessment.objects.filter(groups__in=student_groups).distinct()
+    quiz_submissions = (
+        QuizSubmission.objects.filter(
+            user=student_user,
+            quiz__in=accessible_assessments.values_list("quiz_id", flat=True)
+        )
+        .select_related("quiz")
+        .distinct()
+        .order_by("-submitted_at")
+    )
+
+    # ✅ Module completion overview
     module_progress = []
-    for module in Module.objects.all():
+    modules = Module.objects.filter(groups__in=student_groups).distinct()
+
+    for module in modules:
         questions = module.questions.all()
         total = questions.count()
         completed = Submission.objects.filter(
-            user=student,
+            user=student_user,
             question__in=questions,
             status="Accepted"
         ).values("question").distinct().count()
@@ -2094,17 +2203,18 @@ def student_performance_detail(request, student_id):
             module_progress.append({
                 "module_title": module.title,
                 "completed": completed,
-                "total": total,
-                'remaining': total - completed
+                "remaining": total - completed
             })
 
-    return render(request, 'codingapp/student_performance_detail.html', {
-        'student': student,
-        'coding_submissions': coding_submissions,
-        'quiz_submissions': quiz_submissions,
-        'module_progress': module_progress,
-        
-    })
+    context = {
+        "student": student_user,
+        "coding_submissions": coding_submissions,
+        "quiz_submissions": quiz_submissions,
+        "module_progress": module_progress,
+    }
+
+    return render(request, "codingapp/student_performance_detail.html", context)
+
 
 
 
@@ -2113,7 +2223,7 @@ from django.http import HttpResponse
 from django.db.models import Avg
 
 @login_required
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def export_student_performance(request):
     selected_group_id = request.GET.get('group')
     search_query = request.GET.get('q', '')
@@ -2608,7 +2718,12 @@ def admin_manage_users(request):
         return redirect("dashboard")
 
     # Load roles and departments
-    roles = Role.objects.all().order_by("name")
+    from django.db.models.functions import Lower
+    roles = (
+    Role.objects.annotate(name_lower=Lower("name"))
+    .order_by("name_lower")
+    .distinct("name_lower")
+)
     departments = Department.objects.all().order_by("name")
 
     # Prefetch all users with relations
@@ -2932,7 +3047,11 @@ from codingapp.models import Group, Department, UserProfile
 
 @login_required
 def manage_groups(request):
-    """Unified Manage Groups view (CRUD + Department filter + student assignment)."""
+    """
+    Manage Groups (Admin/HOD full access, Teachers limited to their assigned groups)
+    - Admin & HOD: can create/edit/delete groups, assign teachers & students
+    - Teachers: can only view and edit groups assigned to them
+    """
 
     profile = getattr(request.user, "userprofile", None)
     if not profile or not profile.role:
@@ -2941,30 +3060,41 @@ def manage_groups(request):
 
     role_name = profile.role.name.lower()
 
-    # Permissions: only Admin, HOD, and Teacher can access
-    if role_name not in ["admin", "hod", "teacher"]:
+    # Admin and HOD: full control
+    groups = get_user_accessible_groups(request.user).select_related("department").prefetch_related("students", "teachers")
+
+    if role_name in ["admin", "hod"]:
+        departments = Department.objects.all().order_by("name")
+        teachers = UserProfile.objects.filter(role__name__iexact="teacher").select_related("user")
+        students = UserProfile.objects.filter(role__name__iexact="student").select_related("user")
+
+        if role_name == "hod":
+            groups = groups.filter(department=profile.department)
+            departments = Department.objects.filter(id=profile.department_id)
+            teachers = teachers.filter(department=profile.department)
+            students = students.filter(department=profile.department)
+
+    elif role_name == "teacher":
+        departments = Department.objects.filter(id=profile.department_id)
+        teachers = UserProfile.objects.filter(user=request.user)
+        students = UserProfile.objects.filter(department=profile.department)
+
+    else:
         messages.error(request, "Access denied.")
         return redirect("dashboard")
 
-    # Determine department filter (HOD/Teacher limited to their dept)
-    if role_name == "admin":
-        departments = Department.objects.all().order_by("name")
-        groups = Group.objects.select_related("department").prefetch_related("students").order_by("department__name", "name")
-        students = UserProfile.objects.filter(role__name__iexact="student").select_related("user").order_by("user__username")
-    else:
-        departments = Department.objects.filter(id=profile.department_id)
-        groups = Group.objects.filter(department=profile.department).select_related("department").prefetch_related("students").order_by("name")
-        students = UserProfile.objects.filter(role__name__iexact="student", department=profile.department).select_related("user").order_by("user__username")
-
-    # ---------- Handle POST actions ----------
+    # =======================
+    # 🔧 Handle POST Actions
+    # =======================
     if request.method == "POST":
         action = request.POST.get("action")
 
-        # ✅ Create or Edit Group
-        if action == "add_or_edit_group":
+        # ✅ Create or Edit Group (Admin/HOD only)
+        if action == "add_or_edit_group" and role_name in ["admin", "hod"]:
             group_id = request.POST.get("group_id")
             name = request.POST.get("name", "").strip()
-            dept_id = request.POST.get("department_id") or None
+            dept_id = request.POST.get("department_id")
+            teacher_ids = request.POST.getlist("teacher_ids")
             student_ids = request.POST.getlist("student_ids")
 
             if not name:
@@ -2973,52 +3103,54 @@ def manage_groups(request):
 
             department = None
             if dept_id:
-                try:
-                    department = Department.objects.get(id=dept_id)
-                except Department.DoesNotExist:
-                    messages.error(request, "Invalid department selected.")
-                    return redirect("manage_groups")
+                department = get_object_or_404(Department, id=dept_id)
 
             if group_id:
-                # Edit existing
-                try:
-                    group = Group.objects.get(id=group_id)
-                    group.name = name
-                    group.department = department
-                    group.save()
-                    # Update students
-                    if student_ids:
-                        group.students.set([s.user for s in UserProfile.objects.filter(id__in=student_ids)])
-                    else:
-                        group.students.clear()
-                    messages.success(request, f"Updated group '{group.name}'.")
-                except Group.DoesNotExist:
-                    messages.error(request, "Group not found.")
+                # Edit
+                group = get_object_or_404(Group, id=group_id)
+                if role_name == "hod" and group.department != profile.department:
+                    messages.error(request, "You can only manage groups in your department.")
+                    return redirect("manage_groups")
+
+                group.name = name
+                group.department = department
+                group.save()
+                group.teachers.set([UserProfile.objects.get(id=t).user for t in teacher_ids])
+                group.students.set([UserProfile.objects.get(id=s).user for s in student_ids])
+                messages.success(request, f"Group '{group.name}' updated successfully.")
             else:
-                # Create new
-                group = Group.objects.create(name=name, department=department)
-                if student_ids:
-                    group.students.set([s.user for s in UserProfile.objects.filter(id__in=student_ids)])
+                # Create
+                group = Group.objects.create(
+                    name=name,
+                    department=department,
+                    created_by=request.user
+                )
+                group.teachers.set([UserProfile.objects.get(id=t).user for t in teacher_ids])
+                group.students.set([UserProfile.objects.get(id=s).user for s in student_ids])
                 messages.success(request, f"Group '{group.name}' created successfully.")
 
             return redirect("manage_groups")
 
-        # ✅ Delete Group
-        elif action == "delete_group":
+        # ✅ Delete Group (Admin/HOD only)
+        elif action == "delete_group" and role_name in ["admin", "hod"]:
             group_id = request.POST.get("group_id")
-            try:
-                group = Group.objects.get(id=group_id)
+            group = get_object_or_404(Group, id=group_id)
+            if role_name == "hod" and group.department != profile.department:
+                messages.error(request, "You cannot delete groups outside your department.")
+            else:
                 name = group.name
                 group.delete()
                 messages.success(request, f"Group '{name}' deleted successfully.")
-            except Group.DoesNotExist:
-                messages.error(request, "Group not found.")
             return redirect("manage_groups")
 
-    # ---------- Context ----------
+    # =======================
+    # 📦 Render Context
+    # =======================
     context = {
         "groups": groups,
         "departments": departments,
+        "teachers": teachers,
         "students": students,
+        "role_name": role_name,
     }
     return render(request, "dashboard/manage_groups.html", context)

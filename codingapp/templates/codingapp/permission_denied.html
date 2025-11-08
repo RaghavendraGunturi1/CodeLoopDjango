@@ -1,5 +1,10 @@
 {% extends "codingapp/base.html" %}
 {% block content %}
-<h2>Permission Denied</h2>
-<p>You do not have access to this resource.</p>
+<div class="container text-center mt-5">
+  <div class="alert alert-danger shadow-lg">
+    <h3>🚫 Access Denied</h3>
+    <p>You don’t have permission to view this page or resource.</p>
+    <a href="{% url 'dashboard' %}" class="btn btn-outline-light mt-3">Return to Dashboard</a>
+  </div>
+</div>
 {% endblock %}

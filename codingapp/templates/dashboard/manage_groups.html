@@ -42,18 +42,30 @@
           </div>
 
           <div class="col-md-3">
+            <label class="form-label">Assign Teachers {% if role_name != 'admin' and role_name != 'hod' %}(disabled){% endif %}</label>
+            <select name="teacher_ids" id="teacher_ids" class="form-select" multiple {% if role_name != 'admin' and role_name != 'hod' %}disabled{% endif %}>
+              {% for teacher in teachers %}
+                {# teacher is a UserProfile in the view; value is profile.id #}
+                <option value="{{ teacher.id }}">{{ teacher.user.username }} {% if teacher.full_name %} — {{ teacher.full_name }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <small class="text-muted d-block">Assign one or more teachers (use Ctrl / Shift). Only Admin/HOD can change this.</small>
+          </div>
+
+          <div class="col-md-2">
+            <label class="form-label d-block">&nbsp;</label>
+            <button type="submit" class="btn btn-success w-100">Save</button>
+          </div>
+
+          <div class="col-12">
             <label class="form-label">Assign Students (optional)</label>
             <select name="student_ids" id="student_ids" class="form-select" multiple>
               {% for student in students %}
                 {# student is UserProfile in the view; value is profile.id #}
-                <option value="{{ student.id }}">{{ student.user.username }}</option>
+                <option value="{{ student.id }}">{{ student.user.username }} {% if student.full_name %} — {{ student.full_name }}{% endif %}</option>
               {% endfor %}
             </select>
-            <small class="text-muted">Use Ctrl / Shift to select multiple</small>
-          </div>
-
-          <div class="col-md-2">
-            <button type="submit" class="btn btn-success w-100">Save</button>
+            <small class="text-muted">Use Ctrl / Shift to select multiple students</small>
           </div>
         </div>
       </form>
@@ -71,6 +83,7 @@
           <tr>
             <th>Group</th>
             <th>Department</th>
+            <th>Teachers</th>
             <th>Students</th>
             <th style="width: 220px;">Actions</th>
           </tr>
@@ -80,6 +93,30 @@
           <tr>
             <td>{{ g.name }}</td>
             <td>{{ g.department.name|default:"—" }}</td>
+
+            <td>
+              {% with teachers_count=g.teachers.count %}
+                {% if teachers_count > 0 %}
+                  {{ teachers_count }} Teacher{{ teachers_count|pluralize }}
+                  <button class="btn btn-sm btn-outline-info ms-2" type="button" data-bs-toggle="collapse" data-bs-target="#teachers-{{ g.id }}">
+                    View
+                  </button>
+
+                  <ul id="teachers-{{ g.id }}" class="collapse list-group mt-2">
+                    {% for t in g.teachers.all %}
+                      {# t is a User instance (if your Group.teachers -> User). We attempt to show username and fullname if available #}
+                      <li class="list-group-item py-1">
+                        {{ t.username }}
+                        {% if t.userprofile.full_name %} — {{ t.userprofile.full_name }} {% endif %}
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <span class="text-muted">No teachers</span>
+                {% endif %}
+              {% endwith %}
+            </td>
+
             <td>
               {% with students_count=g.students.count %}
                 {% if students_count > 0 %}
@@ -98,20 +135,21 @@
                 {% endif %}
               {% endwith %}
             </td>
+
             <td>
               <div class="d-flex gap-2 flex-wrap">
                 
+                {# Build arrays of teacher/profile ids and student/profile ids to pass into JS editGroup #}
                 <button type="button" class="btn btn-sm btn-outline-warning"
-                        onclick="editGroup(
-                          {{ g.id }},
-                          {{ g.department.id|default:'null' }},
-                          '{{ g.name|escapejs }}',
-                          [{% for u in g.students.all %}
-                              {{ u.userprofile.id }}{% if not forloop.last %}, {% endif %}
-                          {% endfor %}]
-                        )">
-                  Edit
-                </button>
+                      onclick="editGroup(
+                        {{ g.id }},
+                        {{ g.department.id|default:'null' }},
+                        '{{ g.name|escapejs }}',
+                        [{% for t in g.teachers.all %}{{ t.userprofile.id|default:0 }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+                        [{% for u in g.students.all %}{{ u.userprofile.id|default:0 }}{% if not forloop.last %}, {% endif %}{% endfor %}]
+                      )">
+                Edit
+              </button>
 
 
                 <form method="POST" style="display:inline;" onsubmit="return confirm('Delete {{ g.name }}?');">
@@ -125,7 +163,7 @@
           </tr>
           {% empty %}
           <tr>
-            <td colspan="4" class="text-center text-muted py-3">No groups found.</td>
+            <td colspan="5" class="text-center text-muted py-3">No groups found.</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -137,17 +175,19 @@
 <!-- ========================= JS ========================= -->
 <script>
 /**
- * Populate the Add/Edit form and switch to "Edit mode".
- * - id: group id (int)
- * - departmentId: integer or null
- * - name: string (escaped)
- * - studentIds: array of UserProfile ids (ints)
+ * editGroup(...) now accepts:
+ *  id (group id),
+ *  departmentId (null or int),
+ *  name (string),
+ *  teacherIds (array of UserProfile ids),
+ *  studentIds (array of UserProfile ids)
  */
-function editGroup(id, departmentId, name, studentIds) {
+function editGroup(id, departmentId, name, teacherIds, studentIds) {
   const groupField = document.getElementById('group_id');
   const nameField = document.getElementById('group_name');
   const deptSelect = document.getElementById('department_id');
   const studentSelect = document.getElementById('student_ids');
+  const teacherSelect = document.getElementById('teacher_ids');
 
   const header = document.getElementById('groupFormHeader');
   const modeText = document.getElementById('formModeText');
@@ -159,9 +199,18 @@ function editGroup(id, departmentId, name, studentIds) {
   nameField.value = name;
   deptSelect.value = (departmentId === null) ? '' : departmentId;
 
-  // Clear previous selection and set new
-  for (const option of studentSelect.options) {
-    option.selected = studentIds.includes(parseInt(option.value));
+  // Teachers multi-select: clear and set
+  if (teacherSelect) {
+    for (const option of teacherSelect.options) {
+      option.selected = teacherIds && teacherIds.includes(parseInt(option.value));
+    }
+  }
+
+  // Students multi-select: clear and set
+  if (studentSelect) {
+    for (const option of studentSelect.options) {
+      option.selected = studentIds && studentIds.includes(parseInt(option.value));
+    }
   }
 
   // Change header color and text to indicate edit mode
@@ -171,7 +220,7 @@ function editGroup(id, departmentId, name, studentIds) {
   modeIcon.textContent = '🖊';
   cancelBtn.classList.remove('d-none');
 
-  // Smooth scroll to top of form
+  // Scroll to top of page to show form
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -186,10 +235,16 @@ function resetGroupForm() {
   const groupField = document.getElementById('group_id');
   if (groupField) groupField.value = '';
 
-  // Clear multi-select
+  // Clear multi-selects
   const studentSelect = document.getElementById('student_ids');
   if (studentSelect) {
     for (const option of studentSelect.options) {
+      option.selected = false;
+    }
+  }
+  const teacherSelect = document.getElementById('teacher_ids');
+  if (teacherSelect) {
+    for (const option of teacherSelect.options) {
       option.selected = false;
     }
   }
