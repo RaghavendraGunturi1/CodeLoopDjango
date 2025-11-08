@@ -130,17 +130,19 @@ class AssessmentForm(forms.ModelForm):
         }
 
 
-from .models import Group
 from django import forms
+from .models import Module, Group
+
 class ModuleForm(forms.ModelForm):
     class Meta:
         model = Module
-        fields = ['title', 'description', 'groups']
+        fields = ['title', 'description', 'groups']  # ✅ include 'groups' here
         widgets = {
-            "title": forms.TextInput(attrs={"class": "form-control"}),
-            "description": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
-            "groups": forms.SelectMultiple(attrs={"class": "form-control"}),
+            'title': forms.TextInput(attrs={'class': 'form-control'}),
+            'description': forms.Textarea(attrs={'class': 'form-control'}),
+            'groups': forms.SelectMultiple(attrs={'class': 'form-select'}),  # ✅ style the multi-select
         }
+
 
 from django import forms
 from .models import Group

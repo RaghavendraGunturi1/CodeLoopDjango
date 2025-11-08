@@ -82,7 +82,14 @@ def validate_test_cases(value):
 # Domain models
 # -----------------------------
 # --- Group model ---
+
 class Group(models.Model):
+    """
+    Represents a class/section of students.
+    - Created by HOD or Admin.
+    - Can have multiple assigned teachers.
+    - Teachers can view/edit only the groups assigned to them.
+    """
     name = models.CharField(max_length=100)
     department = models.ForeignKey(
         'Department',
@@ -92,15 +99,41 @@ class Group(models.Model):
         blank=True
     )
     students = models.ManyToManyField(User, related_name='custom_groups', blank=True)
+    teachers = models.ManyToManyField(
+        User,
+        related_name='teaching_groups',
+        blank=True,
+        help_text="Teachers assigned to manage this group"
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='groups_created',
+        help_text="The admin or HOD who created this group"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         unique_together = ('name', 'department')
         ordering = ['department__name', 'name']
 
     def __str__(self):
-        if self.department:
-            return f"{self.name} ({self.department.name})"
-        return self.name
+        dept = f" ({self.department.name})" if self.department else ""
+        return f"{self.name}{dept}"
+
+    def can_user_manage(self, user):
+        """Return True if user can view/edit this group."""
+        profile = getattr(user, 'userprofile', None)
+        if not profile or not profile.role:
+            return False
+        role = profile.role.name.lower()
+        if role in ["admin", "hod"]:
+            return True
+        if role == "teacher":
+            return self.teachers.filter(id=user.id).exists()
+        return False
 
 
 
