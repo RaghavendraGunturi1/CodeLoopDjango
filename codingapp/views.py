@@ -3148,10 +3148,73 @@ def manage_groups(request):
                 group.delete()
                 messages.success(request, f"Group '{name}' deleted successfully.")
             return redirect("manage_groups")
+    
+    if request.method == "POST" and request.POST.get("action") == "teacher_bulk_upload_students":
+        profile = getattr(request.user, "userprofile", None)
+        group_id = request.POST.get("group_id")
+        excel_file = request.FILES.get("excel_file")
 
-    # =======================
-    # 📦 Render Context
-    # =======================
+        if not profile or not profile.role or profile.role.name.lower() != "teacher":
+            messages.error(request, "Access denied. Only teachers can upload students.")
+            return redirect("manage_groups")
+
+        if not group_id or not excel_file:
+            messages.error(request, "Missing group or file.")
+            return redirect("manage_groups")
+
+        # Ensure teacher has access to this group
+        group = get_object_or_404(Group, id=group_id)
+        if not group.teachers.filter(id=request.user.id).exists():
+            messages.error(request, "You can only upload students for your assigned groups.")
+            return redirect("manage_groups")
+
+        # ✅ Parse Excel file
+        try:
+            wb = openpyxl.load_workbook(excel_file)
+            ws = wb.active
+            headers = [str(cell.value).strip().lower() if cell.value else "" for cell in ws[1]]
+
+            required = ["username", "email", "full_name", "password"]
+            if not all(h in headers for h in required):
+                messages.error(request, f"Missing required headers. Expected: {', '.join(required)}")
+                return redirect("manage_groups")
+
+            created = skipped = 0
+            dept = profile.department  # auto-assign teacher's department
+
+            for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                data = dict(zip(headers, row))
+                username = (data.get("username") or "").strip()
+                email = (data.get("email") or "").strip()
+                password = (data.get("password") or "password123").strip()
+                full_name = (data.get("full_name") or "").strip()
+
+                if not username or not email:
+                    continue
+
+                if User.objects.filter(username=username).exists():
+                    skipped += 1
+                    continue
+
+                user = User.objects.create_user(username=username, email=email, password=password)
+                profile_obj, _ = UserProfile.objects.get_or_create(user=user)
+                profile_obj.full_name = full_name
+                profile_obj.department = dept
+                profile_obj.role = Role.objects.filter(name__iexact="student").first()
+                profile_obj.save()
+
+                # ✅ Add to this group
+                group.students.add(user)
+                created += 1
+
+            messages.success(request, f"✅ Uploaded {created} students. {skipped} skipped (existing usernames).")
+
+        except Exception as e:
+            messages.error(request, f"Error processing file: {e}")
+
+        return redirect("manage_groups")
+
+    # Prepare context
     context = {
         "groups": groups,
         "departments": departments,
@@ -3159,4 +3222,14 @@ def manage_groups(request):
         "students": students,
         "role_name": role_name,
     }
+
+    # ✅ Group the groups by department
+    from collections import defaultdict
+    grouped_by_department = defaultdict(list)
+    for g in groups:
+        dept_name = g.department.name if g.department else "Unassigned Department"
+        grouped_by_department[dept_name].append(g)
+
+    context["grouped_by_department"] = dict(grouped_by_department)
+
     return render(request, "dashboard/manage_groups.html", context)
