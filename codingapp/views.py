@@ -1690,7 +1690,9 @@ def notice_detail(request, pk):
 from django.db.models import Q
 
 # Staff: Add notice
-@user_passes_test(lambda u: u.is_staff)
+from codingapp.utils import is_teacher, is_hod, is_admin
+
+@login_required
 def add_notice(request):
     if request.method == "POST":
         form = NoticeForm(request.POST, request.FILES)
@@ -1712,8 +1714,9 @@ def add_notice(request):
 
 # Staff: Edit and Delete Notice (similar pattern, optional for now)
 from django.contrib import messages
+from codingapp.utils import is_teacher, is_hod, is_admin
 
-@user_passes_test(lambda u: u.is_staff)
+@login_required
 def edit_notice(request, pk):
     notice = get_object_or_404(Notice, pk=pk)
     if request.method == "POST":
@@ -1725,8 +1728,10 @@ def edit_notice(request, pk):
     else:
         form = NoticeForm(instance=notice)
     return render(request, "codingapp/edit_notice.html", {"form": form, "notice": notice})
+from codingapp.utils import is_teacher, is_hod, is_admin
+from codingapp.utils import is_teacher, is_hod, is_admin
 
-@user_passes_test(lambda u: u.is_staff)
+@login_required
 def delete_notice(request, pk):
     notice = get_object_or_404(Notice, pk=pk)
     if request.method == "POST":
@@ -1761,8 +1766,9 @@ import openpyxl
 from django.contrib.auth.decorators import user_passes_test
 from .forms import BulkMCQUploadForm
 from .models import Question
+from codingapp.utils import is_teacher, is_hod, is_admin
 
-@user_passes_test(lambda u: u.is_staff)
+@login_required
 def bulk_mcq_upload(request):
     result = None
     if request.method == "POST":

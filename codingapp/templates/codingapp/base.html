@@ -153,7 +153,7 @@
                         {% if 'bulk_edit_users' in user_perms or is_admin_like %}
                             <li><a class="dropdown-item" href="{% url 'bulk_user_upload' %}">Bulk User Upload</a></li>
                         {% endif %}
-                        {% if 'bulk_mcq_upload' in user_perms or is_admin_like %}
+                        {% if user.userprofile.role.name|lower in "admin hod teacher" %}
                             <li><a class="dropdown-item" href="{% url 'bulk_mcq_upload' %}">Bulk MCQ Upload</a></li>
                         {% endif %}
                     </ul>
