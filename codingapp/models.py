@@ -31,7 +31,9 @@ class Module(models.Model):
     title = models.CharField(max_length=255, unique=True)
     slug = models.SlugField(unique=True, blank=True)
     description = models.TextField(blank=True, null=True)
-    groups = models.ManyToManyField(Group, related_name='modules', blank=True)  # Only here!
+    # ⭐ ADD THESE TWO FIELDS
+    is_public = models.BooleanField(default=False, help_text="If checked, this module is visible to all students.")
+    groups = models.ManyToManyField(Group, blank=True, help_text="Assign this module to specific groups. Ignored if 'Is Public' is checked.")
 
     def save(self, *args, **kwargs):
         if not self.slug:

@@ -4,14 +4,8 @@ from .models import Module, Question
 import json
 
 
-class ModuleForm(forms.ModelForm):
-    class Meta:
-        model = Module
-        fields = ["title", "description"]
-        widgets = {
-            "title": forms.TextInput(attrs={"class": "form-control"}),
-            "description": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
-        }
+from .models import Group
+from django import forms
 
 from django.forms import formset_factory
 
@@ -127,19 +121,6 @@ class AssessmentForm(forms.ModelForm):
             'groups': forms.SelectMultiple(attrs={'class': 'form-control'}),
             'quiz': forms.Select(attrs={'class': 'form-control'}),
             'questions': forms.SelectMultiple(attrs={'class': 'form-control'}),
-        }
-
-
-from .models import Group
-from django import forms
-class ModuleForm(forms.ModelForm):
-    class Meta:
-        model = Module
-        fields = ['title', 'description', 'groups']
-        widgets = {
-            "title": forms.TextInput(attrs={"class": "form-control"}),
-            "description": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
-            "groups": forms.SelectMultiple(attrs={"class": "form-control"}),
         }
 
 from django import forms
@@ -318,3 +299,16 @@ CourseContentFormSet = inlineformset_factory(
 )
 
 
+class ModuleForm(forms.ModelForm):
+    class Meta:
+        model = Module
+        # ⭐ FIX: Include both new fields (is_public and groups)
+        fields = ["title", "description", "is_public", "groups"] 
+        widgets = {
+            "title": forms.TextInput(attrs={"class": "form-control"}),
+            "description": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+            # Use CheckboxInput for is_public (for the template's form-check structure)
+            "is_public": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            # Use CheckboxSelectMultiple for groups (needed for manual rendering loop)
+            "groups": forms.CheckboxSelectMultiple, 
+        }

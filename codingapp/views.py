@@ -208,24 +208,45 @@ from .forms import ModuleForm, QuestionForm
 @login_required
 def module_list(request):
     if request.user.is_staff:
-        mods = Module.objects.all()
+        # Staff members can see all modules
+        modules = Module.objects.all().order_by('title')
     else:
+        # Students see modules that are public OR assigned to any of their groups
         user_groups = request.user.custom_groups.all()
-        mods = Module.objects.filter(groups__in=user_groups).distinct()
-    return render(request, 'codingapp/module_list.html', {'modules': mods})
+        modules = Module.objects.filter(
+            Q(is_public=True) | Q(groups__in=user_groups)
+        ).distinct().order_by('title')
+
+    # Get the set of module IDs that the user has completed
+    completed_modules = set(
+        ModuleCompletion.objects.filter(
+            user=request.user, module__in=modules
+        ).values_list('module_id', flat=True)
+    )
+    
+    context = {
+        'modules': modules,
+        'completed_modules': completed_modules,
+    }
+    return render(request, 'codingapp/module_list.html', context)
 
 
-from .models import ModuleCompletion  # make sure this is imported
+from .models import ModuleCompletion # Make sure this is imported at the top
 
 @login_required
 def module_detail(request, module_id):
     module = get_object_or_404(Module, id=module_id)
 
+    # ⭐ UPDATED PERMISSION CHECK
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
-        if not module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
+        # A student can access if the module is public OR if they are in an assigned group.
+        is_assigned_to_group = module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists()
+        
+        if not module.is_public and not is_assigned_to_group:
             return render(request, "codingapp/permission_denied.html", status=403)
 
+    # The rest of your logic is correct and remains the same
     questions = module.questions.all()
     total_count = questions.count()
 
@@ -235,7 +256,6 @@ def module_detail(request, module_id):
         status="Accepted"
     ).values("question").distinct().count()
 
-    # ✅ Check if already marked as completed
     is_completed = ModuleCompletion.objects.filter(
         user=request.user,
         module=module
@@ -245,26 +265,47 @@ def module_detail(request, module_id):
         "module": module,
         "total_count": total_count,
         "completed_count": completed_count,
-        "is_completed": is_completed,  # ✅ Add to context
+        "is_completed": is_completed,
     })
 
 
 @staff_member_required
 def add_module(request):
-    form = ModuleForm(request.POST or None)
-    if form.is_valid():
-        form.save()
-        return redirect("module_list")
-    return render(request, "codingapp/module_form.html", {"form": form})
+    if request.method == 'POST':
+        form = ModuleForm(request.POST)
+        if form.is_valid():
+            # ⭐ FIX Step 1: Save the form with commit=False to create an object in memory
+            module = form.save(commit=False)
+            
+            # (If you needed to add other data, like author, you'd do it here)
+            # module.created_by = request.user
+            
+            # ⭐ FIX Step 2: Save the main object to the database. It now has an ID.
+            module.save()
+            
+            # ⭐ FIX Step 3: Now, explicitly save the many-to-many data (the groups).
+            form.save_m2m()
+            
+            messages.success(request, "Module created successfully!")
+            return redirect("module_list")
+    else:
+        form = ModuleForm()
+        
+    return render(request, "codingapp/module_form.html", {"form": form, "action": "Add"})
 
 @staff_member_required
 def edit_module(request, module_id):
     mod = get_object_or_404(Module, id=module_id)
-    form = ModuleForm(request.POST or None, instance=mod)
-    if form.is_valid():
-        form.save()
-        return redirect("module_list")
-    return render(request, "codingapp/module_form.html", {"form": form})
+    if request.method == 'POST':
+        form = ModuleForm(request.POST, instance=mod)
+        if form.is_valid():
+            form.save() # On an existing object, this is usually sufficient, but being explicit is better.
+            messages.success(request, "Module updated successfully!")
+            return redirect("module_list")
+    else:
+        form = ModuleForm(instance=mod)
+        
+    return render(request, "codingapp/module_form.html", {"form": form, "action": "Edit"})
 
 @staff_member_required
 def delete_module(request, module_id):

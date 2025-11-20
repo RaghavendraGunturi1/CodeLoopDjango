@@ -16,7 +16,7 @@ SUPPORTED_LANGUAGES = ["python", "c", "cpp", "java", "javascript"]
 
 
 #ALLOWED_HOSTS = ['localhost', '127.0.0.1','192.168.72.169']
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1','nonfiguratively-unconfected-lora.ngrok-free.dev','*']
 
 RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
 if RENDER_EXTERNAL_HOSTNAME:
@@ -94,6 +94,9 @@ DATABASES = {
 }
 
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'  # ✅ Use database-backed session storage
+CSRF_TRUSTED_ORIGINS = [
+    'https://nonfiguratively-unconfected-lora.ngrok-free.dev',
+]
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},

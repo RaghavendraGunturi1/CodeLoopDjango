@@ -8,7 +8,6 @@
 <div class="card p-4 mx-auto" style="max-width: 900px;">
     <h2>{% if form.instance.pk %}Edit Module{% else %}Add Module{% endif %}</h2>
     
-    <!-- Display form errors if any -->
     {% if form.errors %}
         <div class="alert alert-danger" role="alert">
             <ul>
@@ -26,7 +25,7 @@
 
     <form method="post" id="module-form">
         {% csrf_token %}
-        <!-- Render fields manually for better control -->
+        
         <div class="mb-3">
             <label for="{{ form.title.id_for_label }}" class="form-label">{{ form.title.label }}</label>
             {{ form.title }}
@@ -36,6 +35,36 @@
             {{ form.description }}
         </div>
 
+        <div class="mb-3">
+            <div class="form-check">
+                {{ form.is_public }}
+                <label class="form-check-label" for="{{ form.is_public.id_for_label }}">
+                    {{ form.is_public.label }}
+                </label>
+            </div>
+            {% for error in form.is_public.errors %}
+                <div class="text-danger small">{{ error }}</div>
+            {% endfor %}
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">{{ form.groups.label }}</label>
+            <div class="form-control" style="max-height: 200px; overflow-y: auto;">
+                {% for checkbox in form.groups %}
+                    <div class="form-check">
+                        {{ checkbox.tag }}
+                        <label class="form-check-label" for="{{ checkbox.id_for_label }}">
+                            {{ checkbox.choice_label }}
+                        </label>
+                    </div>
+                {% endfor %}
+            </div>
+            <div class="form-text text-muted small">{{ form.groups.help_text }}</div>
+            {% for error in form.groups.errors %}
+                <div class="text-danger small">{{ error }}</div>
+            {% endfor %}
+        </div>
+        
         {% if formset %}
         <hr>
         <h4 class="mt-4">Questions in this Module</h4>
