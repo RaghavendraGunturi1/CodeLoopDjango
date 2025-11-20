@@ -1,28 +1,91 @@
 {% extends "codingapp/base.html" %}
 {% block content %}
-<h2>Groups</h2>
-<a href="{% url 'teacher_add_group' %}" class="btn btn-primary mb-2">Add Group</a>
-<table class="table">
-  <thead>
-    <tr><th>Name</th><th>Students</th><th>Actions</th></tr>
-  </thead>
-  <tbody>
+<div class="container mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="text-primary">Groups</h2>
+    <a href="{% url 'teacher_add_group' %}" class="btn btn-primary">
+      <i class="fas fa-plus-circle"></i> Add Group
+    </a>
+  </div>
+
+  {% if groups %}
+  <div class="row">
     {% for group in groups %}
-    <tr>
-      <td>{{ group.name }}</td>
-      <td>
-        {% for student in group.students.all %}
-          {{ student.username }}{% if not forloop.last %}, {% endif %}
-        {% endfor %}
-      </td>
-      <td>
-        <a href="{% url 'teacher_edit_group' group.id %}" class="btn btn-sm btn-warning">Edit</a>
-        <a href="{% url 'teacher_delete_group' group.id %}" class="btn btn-sm btn-danger">Delete</a>
-      </td>
-    </tr>
-    {% empty %}
-    <tr><td colspan="3">No groups found.</td></tr>
+    <div class="col-md-6 col-lg-4 mb-4">
+      <div class="card h-100 shadow-sm">
+        <div class="card-header bg-primary text-white">
+          <h5 class="card-title mb-0">{{ group.name }}</h5>
+        </div>
+        <div class="card-body">
+          <strong>Students:</strong>
+          <ul class="list-group list-group-flush mt-2">
+            {% for student in group.students.all|slice:":5" %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <div>
+                <i class="fas fa-user-graduate text-secondary"></i>
+                <strong class="me-2">{{ student.username }}</strong>
+                <span>({{ student.get_full_name }})</span>
+              </div>
+              <span class="badge bg-secondary rounded-pill">
+                {{ student.userprofile.roll_number }}
+              </span>
+            </li>
+            {% endfor %}
+            {% if group.students.all|length > 5 %}
+            <div class="collapse" id="moreStudents{{ group.id }}">
+              <ul class="list-group list-group-flush">
+                {% for student in group.students.all|slice:"5:" %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  <div>
+                    <i class="fas fa-user-graduate text-secondary"></i>
+                    <strong class="me-2">{{ student.username }}</strong>
+                    <span>({{ student.get_full_name }})</span>
+                  </div>
+                  <span class="badge bg-secondary rounded-pill">
+                    {{ student.userprofile.roll_number }}
+                  </span>
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
+            <li class="list-group-item text-center">
+              <a class="btn btn-link" data-bs-toggle="collapse" href="#moreStudents{{ group.id }}" role="button" aria-expanded="false" aria-controls="moreStudents{{ group.id }}">
+                View More
+              </a>
+            </li>
+            {% endif %}
+          </ul>
+        </div>
+        <div class="card-footer bg-light d-flex justify-content-end">
+          <a href="{% url 'teacher_edit_group' group.id %}" class="btn btn-sm btn-outline-warning me-2">
+            <i class="fas fa-edit"></i> Edit
+          </a>
+          <a href="{% url 'teacher_delete_group' group.id %}" class="btn btn-sm btn-outline-danger">
+            <i class="fas fa-trash-alt"></i> Delete
+          </a>
+        </div>
+      </div>
+    </div>
     {% endfor %}
-  </tbody>
-</table>
+  </div>
+  {% else %}
+  <div class="text-center mt-5">
+    <p class="lead">No groups found.</p>
+    <a href="{% url 'teacher_add_group' %}" class="btn btn-primary">Create Your First Group</a>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+document.querySelectorAll('[data-bs-toggle="collapse"]').forEach(function (element) {
+  element.addEventListener('click', function () {
+    if (this.getAttribute('aria-expanded') === 'true') {
+      this.innerText = 'View More';
+    } else {
+      this.innerText = 'View Less';
+    }
+  });
+});
+</script>
+
 {% endblock %}

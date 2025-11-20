@@ -1,0 +1,276 @@
+{% extends "codingapp/base.html" %}
+{% load static %}
+{% load dict_extras %}
+{% block content %}
+
+<div class="container mt-4">
+  <h2 class="mb-3">🎓 HOD Permission Management</h2>
+
+  <!-- Search Bar -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-info text-dark">
+      <h5 class="mb-0">🔍 Search Department Users</h5>
+    </div>
+    <div class="card-body">
+      <form method="GET" class="d-flex">
+        <input
+          type="text"
+          name="search"
+          value="{{ request.GET.search|default_if_none:'' }}"
+          class="form-control me-2"
+          placeholder="Search by username, email, or role..."
+        >
+        <button type="submit" class="btn btn-primary">Search</button>
+        {% if request.GET.search %}
+          <a href="{% url 'permissions_hod' %}" class="btn btn-secondary ms-2">Clear</a>
+        {% endif %}
+      </form>
+    </div>
+  </div>
+
+  {% for message in messages %}
+    <div class="alert alert-info">{{ message }}</div>
+  {% endfor %}
+
+  <div class="row gx-4">
+    <!-- LEFT: User list -->
+    <div class="col-md-4">
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <strong>Department Users</strong>
+          <small class="text-muted ms-2">(Teachers & Students)</small>
+        </div>
+
+        <div class="accordion" id="hodUserAccordion">
+          {% regroup users by role.name|default:"Unassigned" as grouped_users %}
+          {% for group in grouped_users %}
+          {% with group_id=group.grouper|slugify %}
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="heading-{{ group_id }}">
+              <button class="accordion-button collapsed" type="button"
+                      data-bs-toggle="collapse"
+                      data-bs-target="#collapse-{{ group_id }}"
+                      aria-expanded="false"
+                      aria-controls="collapse-{{ group_id }}">
+                {{ group.grouper|title }}
+                <span class="badge bg-secondary ms-2">{{ group.list|length }}</span>
+              </button>
+            </h2>
+
+            <div id="collapse-{{ group_id }}" class="accordion-collapse collapse"
+                 aria-labelledby="heading-{{ group_id }}"
+                 data-bs-parent="#hodUserAccordion">
+              <div class="accordion-body p-0">
+                <div class="list-group list-group-flush" style="max-height: 300px; overflow:auto;">
+                  {% for user in group.list %}
+                    <button type="button"
+                            class="list-group-item list-group-item-action d-flex justify-content-between align-items-center hod-user-entry"
+                            data-user-id="{{ user.id }}">
+                      <div>
+                        <strong>{{ user.user.username }}</strong>
+                        <div class="small text-muted">
+                          {{ user.role.name|title }} • {{ user.department.name|default:"—" }}
+                        </div>
+                      </div>
+                      <span class="badge bg-dark">{{ user.user.email|default:"—" }}</span>
+                    </button>
+                  {% empty %}
+                    <div class="list-group-item">No users found.</div>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endwith %}
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Permission editor -->
+    <div class="col-md-8">
+      <div class="card shadow-sm">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <div>
+            <strong id="hod-selected-username">Select a user</strong>
+            <div class="small text-muted" id="hod-selected-role">—</div>
+          </div>
+          <div>
+            <button id="hod-select-all-btn" class="btn btn-sm btn-outline-primary me-2" disabled>Select all</button>
+            <button id="hod-clear-all-btn" class="btn btn-sm btn-outline-secondary me-2" disabled>Clear all</button>
+            <button id="hod-save-perms-btn" class="btn btn-sm btn-success" disabled>Save</button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <p class="text-muted">Manage <strong>custom permissions</strong> for users in your department. Inherited permissions (from their role) are displayed separately and cannot be modified.</p>
+
+          <div class="row">
+            <!-- Inherited permissions -->
+            <div class="col-md-6 mb-3">
+              <div class="card bg-light text-dark h-100">
+                <div class="card-header">
+                  <strong>Inherited Role Permissions</strong>
+                </div>
+                <div class="card-body" style="max-height:52vh; overflow:auto;">
+                  <ul class="list-unstyled" id="hod-inherited-perms">
+                    <li class="text-muted">Select a user to view inherited permissions.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- Custom permissions -->
+            <div class="col-md-6 mb-3">
+              <form id="hod-custom-perms-form" method="POST" action="{% url 'permissions_hod' %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="update_user_perms">
+                <input type="hidden" name="user_id" id="hod-form-user-id" value="">
+
+                <div class="card bg-light text-dark h-100">
+                  <div class="card-header">
+                    <strong>Custom Permissions</strong>
+                    <div class="small text-muted">Select multiple (Shift/Ctrl) & click Save</div>
+                  </div>
+
+                  <div class="card-body" style="max-height:52vh; overflow:auto;">
+                    <div class="mb-2">
+                      <input type="search" id="hod-perm-filter" class="form-control form-control-sm" placeholder="Filter permissions...">
+                    </div>
+
+                    <div id="hod-custom-perms-list">
+                      {% for perm in permissions %}
+                      <div class="form-check hod-permission-item" data-perm-id="{{ perm.id }}">
+                        <input class="form-check-input hod-perm-checkbox" type="checkbox" name="perm_ids" value="{{ perm.id }}" id="perm-{{ perm.id }}">
+                        <label class="form-check-label" for="perm-{{ perm.id }}">
+                          {{ perm.name }} <small class="text-muted">({{ perm.code }})</small>
+                        </label>
+                      </div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div> <!-- card-body -->
+      </div> <!-- card -->
+    </div> <!-- col -->
+  </div> <!-- row -->
+</div> <!-- container -->
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const rolePermMap = JSON.parse('{{ role_perm_json|escapejs }}');
+  const customPermMap = JSON.parse('{{ custom_perm_json|escapejs }}');
+  const userList = document.querySelectorAll('.hod-user-entry');
+  const selectedUsername = document.getElementById('hod-selected-username');
+  const selectedRole = document.getElementById('hod-selected-role');
+  const inheritedList = document.getElementById('hod-inherited-perms');
+  const customPermsList = document.getElementById('hod-custom-perms-list');
+  const formUserId = document.getElementById('hod-form-user-id');
+  const saveBtn = document.getElementById('hod-save-perms-btn');
+  const selectAllBtn = document.getElementById('hod-select-all-btn');
+  const clearAllBtn = document.getElementById('hod-clear-all-btn');
+  const permFilter = document.getElementById('hod-perm-filter');
+
+  let activeUserId = null;
+  let lastChecked = null;
+
+  function clearChecks() {
+    document.querySelectorAll('.hod-perm-checkbox').forEach(cb => cb.checked = false);
+  }
+
+  function setChecks(uid) {
+    clearChecks();
+    const setIds = new Set((customPermMap[uid] || []).map(Number));
+    document.querySelectorAll('.hod-perm-checkbox').forEach(cb => {
+      cb.checked = setIds.has(Number(cb.value));
+    });
+  }
+
+  function populateInherited(uid) {
+    inheritedList.innerHTML = '';
+    const ids = rolePermMap[uid] || [];
+    if (ids.length === 0) {
+      inheritedList.innerHTML = '<li class="text-muted">No inherited permissions for this user\'s role.</li>';
+      return;
+    }
+    ids.forEach(pid => {
+      const item = document.querySelector('.hod-permission-item[data-perm-id="'+pid+'"]');
+      if (item) {
+        const label = item.querySelector('label').innerHTML;
+        const li = document.createElement('li');
+        li.innerHTML = `<i class="bi bi-check2-circle text-success me-2"></i> ${label}`;
+        inheritedList.appendChild(li);
+      }
+    });
+  }
+
+  userList.forEach(btn => {
+    btn.addEventListener('click', function () {
+      userList.forEach(x => x.classList.remove('active'));
+      this.classList.add('active');
+
+      activeUserId = this.dataset.userId;
+      formUserId.value = activeUserId;
+
+      selectedUsername.textContent = this.querySelector('strong').textContent;
+      selectedRole.textContent = this.querySelector('.small.text-muted').textContent;
+
+      saveBtn.disabled = false;
+      selectAllBtn.disabled = false;
+      clearAllBtn.disabled = false;
+
+      populateInherited(activeUserId);
+      setChecks(activeUserId);
+    });
+  });
+
+  customPermsList.addEventListener('click', function(e) {
+    const target = e.target;
+    if (!target.classList.contains('hod-perm-checkbox')) return;
+
+    if (e.shiftKey && lastChecked) {
+      const checkboxes = Array.from(document.querySelectorAll('.hod-perm-checkbox'));
+      const start = checkboxes.indexOf(lastChecked);
+      const end = checkboxes.indexOf(target);
+      if (start > -1 && end > -1) {
+        const min = Math.min(start, end);
+        const max = Math.max(start, end);
+        const setChecked = lastChecked.checked;
+        for (let i = min; i <= max; i++) {
+          checkboxes[i].checked = setChecked;
+        }
+      }
+    }
+    lastChecked = target;
+  });
+
+  selectAllBtn.addEventListener('click', function() {
+    document.querySelectorAll('.hod-perm-checkbox').forEach(cb => cb.checked = true);
+  });
+  clearAllBtn.addEventListener('click', function() {
+    document.querySelectorAll('.hod-perm-checkbox').forEach(cb => cb.checked = false);
+  });
+
+  saveBtn.addEventListener('click', function() {
+    if (!activeUserId) {
+      alert('Select a user first.');
+      return;
+    }
+    formUserId.value = activeUserId;
+    document.getElementById('hod-custom-perms-form').submit();
+  });
+
+  permFilter.addEventListener('input', function() {
+    const q = permFilter.value.trim().toLowerCase();
+    document.querySelectorAll('.hod-permission-item').forEach(item => {
+      const lbl = item.querySelector('label').textContent.toLowerCase();
+      item.style.display = lbl.includes(q) ? '' : 'none';
+    });
+  });
+});
+</script>
+
+{% endblock %}

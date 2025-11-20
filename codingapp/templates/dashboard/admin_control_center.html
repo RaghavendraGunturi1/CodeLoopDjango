@@ -1,0 +1,149 @@
+{% extends "codingapp/base.html" %}
+{% load static %}
+{% block content %}
+
+<div class="container mt-5">
+  <h2 class="mb-4 text-center">⚙️ Admin Control Center</h2>
+  <p class="text-muted text-center">Manage every aspect of the platform in one place.</p>
+
+  {% for message in messages %}
+    <div class="alert alert-info">{{ message }}</div>
+  {% endfor %}
+
+  <!-- Role Summary -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-primary text-white">
+      <h5 class="mb-0">🎭 Roles & User Counts</h5>
+    </div>
+    <div class="card-body">
+      <table class="table table-bordered text-center align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Role</th>
+            <th>User Count</th>
+            <th>Manage</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for role in role_counts %}
+          <tr>
+            <td>{{ role.role__name|title }}</td>
+            <td>{{ role.count }}</td>
+            <td>
+              {% if role.role__name|lower == "hod" %}
+                <a href="{% url 'permissions_manage' %}" class="btn btn-sm btn-secondary">Manage HODs</a>
+              {% elif role.role__name|lower == "teacher" %}
+                <a href="{% url 'permissions_manage' %}" class="btn btn-sm btn-secondary">Manage Teachers</a>
+              {% elif role.role__name|lower == "student" %}
+                <a href="{% url 'permissions_manage' %}" class="btn btn-sm btn-secondary">Manage Students</a>
+              {% else %}
+                <span class="text-muted">N/A</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Department Overview -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-success text-white">
+      <h5 class="mb-0">🏫 Departments Overview</h5>
+    </div>
+    <div class="card-body">
+      <table class="table table-striped align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Department</th>
+            <th>Code</th>
+            <th>HOD</th>
+            <th>Total Members</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for dept in departments %}
+          <tr>
+            <td>{{ dept.name }}</td>
+            <td>{{ dept.code }}</td>
+            <td>
+              {# Safe check: dept.hod is stored as a UserProfile or may be null #}
+              {% if dept.hod %}
+                {# Use full_name when available; fall back to username #}
+                {{ dept.hod.full_name|default:dept.hod.user.username }}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td>{{ dept.user_count }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="text-center text-muted">No departments found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Permission Overview -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-warning text-dark">
+      <h5 class="mb-0">🔑 All System Permissions</h5>
+    </div>
+    <div class="card-body">
+      <table class="table table-bordered table-hover">
+        <thead class="table-light">
+          <tr>
+            <th>Permission Code</th>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Assigned To Roles</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for perm in permissions %}
+          <tr>
+            <td><code>{{ perm.code }}</code></td>
+            <td>{{ perm.name }}</td>
+            <td>{{ perm.description|default:"—" }}</td>
+            <td>
+              {% comment %}
+                Iterate roles and show badges for roles that include this permission.
+                This uses `perm in role.permissions.all` which will perform queries if not prefetched.
+                Consider prefetching `roles__permissions` in the view for efficiency.
+              {% endcomment %}
+              {% for role in roles %}
+                {% if perm in role.permissions.all %}
+                  <span class="badge bg-primary">{{ role.name|title }}</span>
+                {% endif %}
+              {% empty %}
+                <span class="text-muted">None</span>
+              {% endfor %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="text-center text-muted">No permissions found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Quick Actions -->
+  <div class="card mb-5 shadow-sm">
+    <div class="card-header bg-dark text-white">
+      <h5 class="mb-0">⚡ Quick Actions</h5>
+    </div>
+    <div class="card-body text-center">
+      <a href="{% url 'admin_manage_users' %}" class="btn btn-outline-info m-2">Manage Users</a>
+      <a href="{% url 'permissions_manage' %}" class="btn btn-outline-primary m-2">Manage Role Permissions</a>
+      <a href="{% url 'permissions_hod' %}" class="btn btn-outline-success m-2">HOD Permission Panel</a>
+      <a href="/admin/" class="btn btn-outline-warning m-2">Open Django Admin</a>
+    </div>
+  </div>
+</div>
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+
+{% endblock %}

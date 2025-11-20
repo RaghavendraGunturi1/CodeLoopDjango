@@ -35,6 +35,7 @@
       {{ form.description }}
     </div>
 
+<<<<<<< HEAD
     <div class="row">
       <div class="col-md-4 mb-3">
         <label for="{{ form.duration_minutes.id_for_label }}" class="form-label">{{ form.duration_minutes.label }}</label>
@@ -49,6 +50,23 @@
         {{ form.end_time }}
       </div>
     </div>
+=======
+    <form method="post" id="module-form">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="{{ form.title.id_for_label }}" class="form-label">{{ form.title.label }}</label>
+            {{ form.title }}
+        </div>
+        <div class="mb-3">
+            <label for="{{ form.description.id_for_label }}" class="form-label">{{ form.description.label }}</label>
+            {{ form.description }}
+        </div>
+        <div class="mb-3">
+        <label for="{{ form.groups.id_for_label }}" class="form-label">Assign Groups</label>
+        {{ form.groups }}
+        <small class="text-muted d-block">Select one or more groups who should access this module.</small>
+        </div>
+>>>>>>> b980e73c86f546779e855c649cbd39afa579f86c
 
     <div class="mb-3">
       <div class="form-check">

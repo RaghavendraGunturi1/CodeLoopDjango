@@ -8,6 +8,13 @@ from .views import (
 
 
 urlpatterns = [
+    path('dashboard/permissions/manage/', views.permissions_manage, name='permissions_manage'),
+    path('dashboard/permissions/hod/', views.permissions_hod, name='permissions_hod'),
+    path('dashboard/admin/control/', views.admin_control_center, name='admin_control_center'),
+    path('dashboard/admin/users/', views.admin_manage_users, name='admin_manage_users'),
+    path("dashboard/admin/departments/", views.admin_manage_departments, name="admin_manage_departments"),
+    path("dashboard/manage/groups/", views.manage_groups, name="manage_groups"),
+
     # Core Routes
     path('', views.home, name='home'),
     path('dashboard/', views.user_dashboard, name='dashboard'),

@@ -1,0 +1,302 @@
+{% extends "codingapp/base.html" %}
+{% load static %}
+{% block content %}
+
+<div class="container mt-5">
+  <h2 class="mb-4 text-center">🏫 Manage Groups</h2>
+
+  {% for message in messages %}
+    <div class="alert alert-info">{{ message }}</div>
+  {% endfor %}
+
+  <!-- ADD / EDIT GROUP CARD -->
+  <div class="card mb-4 shadow-sm">
+    <div id="groupFormHeader" class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">
+        <span id="formModeIcon">➕</span>
+        <span id="formModeText">Add New Group</span>
+      </h5>
+      <button type="button" id="cancelEditBtn" class="btn btn-sm btn-outline-light d-none" onclick="resetGroupForm()">Cancel Edit</button>
+    </div>
+
+    <div class="card-body">
+      <form id="groupForm" method="POST">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_or_edit_group">
+        <input type="hidden" name="group_id" id="group_id">
+
+        <div class="row g-3 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label">Group Name</label>
+            <input type="text" name="name" id="group_name" class="form-control" placeholder="e.g. CSE - Section A" required>
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Department (optional)</label>
+            <select name="department_id" id="department_id" class="form-select">
+              <option value="">—</option>
+              {% for dept in departments %}
+                <option value="{{ dept.id }}">{{ dept.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">Assign Teachers {% if role_name != 'admin' and role_name != 'hod' %}(disabled){% endif %}</label>
+            <select name="teacher_ids" id="teacher_ids" class="form-select" multiple {% if role_name != 'admin' and role_name != 'hod' %}disabled{% endif %}>
+              {% for teacher in teachers %}
+                <option value="{{ teacher.id }}">{{ teacher.user.username }} {% if teacher.full_name %} — {{ teacher.full_name }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <small class="text-muted d-block">Assign one or more teachers (use Ctrl / Shift). Only Admin/HOD can change this.</small>
+          </div>
+
+          <div class="col-md-2">
+            <label class="form-label d-block">&nbsp;</label>
+            <button type="submit" class="btn btn-success w-100">Save</button>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Assign Students (optional)</label>
+            <select name="student_ids" id="student_ids" class="form-select" multiple>
+              {% for student in students %}
+                <option value="{{ student.id }}">{{ student.user.username }} {% if student.full_name %} — {{ student.full_name }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <small class="text-muted">Use Ctrl / Shift to select multiple students</small>
+          </div>
+        </div>
+      </form>
+
+      <!-- ✅ Bulk Upload Section (For Teachers only) -->
+      {% if role_name == 'teacher' %}
+      <div id="bulkUploadSection" class="card mt-4 shadow-sm d-none">
+        <div class="card-header bg-secondary text-white">
+          <h5 class="mb-0">📦 Bulk Upload Students to This Group</h5>
+        </div>
+        <div class="card-body">
+          <p class="text-muted mb-3">
+            Upload students via Excel file (.xlsx). Students will automatically be assigned:
+            <ul>
+              <li>To <strong>your department</strong></li>
+              <li>To <strong>the group being edited</strong></li>
+              <li>With the role <strong>Student</strong></li>
+            </ul>
+            <strong>Required Columns:</strong> username, email, full_name, password
+          </p>
+
+          <form id="bulkUploadForm" method="POST" enctype="multipart/form-data">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="teacher_bulk_upload_students">
+            <input type="hidden" name="group_id" id="upload_group_id">
+
+            <div class="row align-items-center">
+              <div class="col-md-8">
+                <input type="file" name="excel_file" accept=".xlsx, .xls" class="form-control" required>
+              </div>
+              <div class="col-md-4">
+                <button type="submit" class="btn btn-outline-success w-100">Upload Students</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+<!-- EXISTING GROUPS -->
+<div class="card shadow-sm mt-4">
+  <div class="card-header bg-primary text-white">
+    <h5 class="mb-0">📋 Existing Groups by Department</h5>
+  </div>
+
+  <div class="card-body p-0">
+    {% if grouped_by_department %}
+      <div class="accordion" id="departmentAccordion">
+        {% for dept_name, dept_groups in grouped_by_department.items %}
+        <div class="accordion-item">
+          <h2 class="accordion-header" id="heading{{ forloop.counter }}">
+            <button class="accordion-button {% if not forloop.first %}collapsed{% endif %}" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#collapse{{ forloop.counter }}"
+                    aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}"
+                    aria-controls="collapse{{ forloop.counter }}">
+              🏛️ {{ dept_name }}
+            </button>
+          </h2>
+
+          <div id="collapse{{ forloop.counter }}" class="accordion-collapse collapse {% if forloop.first %}show{% endif %}"
+               aria-labelledby="heading{{ forloop.counter }}" data-bs-parent="#departmentAccordion">
+            <div class="accordion-body">
+              <div class="table-responsive">
+                <table class="table table-striped align-middle">
+                  <thead class="table-dark">
+                    <tr>
+                      <th>Group</th>
+                      <th>Teachers</th>
+                      <th>Students</th>
+                      <th style="width: 220px;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for g in dept_groups %}
+                    <tr>
+                      <td>{{ g.name }}</td>
+
+                      <!-- Teachers -->
+                      <td>
+                        {% with teachers_count=g.teachers.count %}
+                          {% if teachers_count > 0 %}
+                            {{ teachers_count }} Teacher{{ teachers_count|pluralize }}
+                            <button class="btn btn-sm btn-outline-info ms-2" type="button" data-bs-toggle="collapse"
+                                    data-bs-target="#teachers-{{ g.id }}">View</button>
+
+                            <ul id="teachers-{{ g.id }}" class="collapse list-group mt-2">
+                              {% for t in g.teachers.all %}
+                                <li class="list-group-item py-1">
+                                  {{ t.username }}
+                                  {% if t.userprofile.full_name %} — {{ t.userprofile.full_name }}{% endif %}
+                                </li>
+                              {% endfor %}
+                            </ul>
+                          {% else %}
+                            <span class="text-muted">No teachers</span>
+                          {% endif %}
+                        {% endwith %}
+                      </td>
+
+                      <!-- Students -->
+                      <td>
+                        {% with students_count=g.students.count %}
+                          {% if students_count > 0 %}
+                            {{ students_count }} Student{{ students_count|pluralize }}
+                            <button class="btn btn-sm btn-outline-info ms-2" type="button" data-bs-toggle="collapse"
+                                    data-bs-target="#students-{{ g.id }}">View</button>
+
+                            <ul id="students-{{ g.id }}" class="collapse list-group mt-2">
+                              {% for user in g.students.all %}
+                                <li class="list-group-item py-1">{{ user.username }}</li>
+                              {% endfor %}
+                            </ul>
+                          {% else %}
+                            <span class="text-muted">No students</span>
+                          {% endif %}
+                        {% endwith %}
+                      </td>
+
+                      <!-- Actions -->
+                      <td>
+                        <div class="d-flex gap-2 flex-wrap">
+                          <button type="button" class="btn btn-sm btn-outline-warning"
+                                  onclick="editGroup(
+                                    {{ g.id }},
+                                    {{ g.department.id|default:'null' }},
+                                    '{{ g.name|escapejs }}',
+                                    [{% for t in g.teachers.all %}{{ t.userprofile.id|default:0 }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+                                    [{% for u in g.students.all %}{{ u.userprofile.id|default:0 }}{% if not forloop.last %}, {% endif %}{% endfor %}]
+                                  )">
+                            Edit
+                          </button>
+
+                          {% if role_name in 'admin hod' %}
+                          <form method="POST" style="display:inline;" onsubmit="return confirm('Delete {{ g.name }}?');">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="delete_group">
+                            <input type="hidden" name="group_id" value="{{ g.id }}">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                          </form>
+                          {% endif %}
+                        </div>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="p-4 text-center text-muted">No groups available.</div>
+    {% endif %}
+  </div>
+</div>
+
+
+</div>
+
+<!-- ========================= JS ========================= -->
+<script>
+function editGroup(id, departmentId, name, teacherIds, studentIds) {
+  const groupField = document.getElementById('group_id');
+  const nameField = document.getElementById('group_name');
+  const deptSelect = document.getElementById('department_id');
+  const studentSelect = document.getElementById('student_ids');
+  const teacherSelect = document.getElementById('teacher_ids');
+  const header = document.getElementById('groupFormHeader');
+  const modeText = document.getElementById('formModeText');
+  const modeIcon = document.getElementById('formModeIcon');
+  const cancelBtn = document.getElementById('cancelEditBtn');
+
+  groupField.value = id;
+  nameField.value = name;
+  deptSelect.value = (departmentId === null) ? '' : departmentId;
+
+  if (teacherSelect) {
+    for (const option of teacherSelect.options) {
+      option.selected = teacherIds && teacherIds.includes(parseInt(option.value));
+    }
+  }
+  if (studentSelect) {
+    for (const option of studentSelect.options) {
+      option.selected = studentIds && studentIds.includes(parseInt(option.value));
+    }
+  }
+
+  header.classList.remove('bg-success', 'text-white');
+  header.classList.add('bg-warning', 'text-dark');
+  modeText.textContent = 'Editing Group';
+  modeIcon.textContent = '🖊';
+  cancelBtn.classList.remove('d-none');
+
+  // Show bulk upload section (teachers only)
+  const uploadSection = document.getElementById('bulkUploadSection');
+  const uploadGroupId = document.getElementById('upload_group_id');
+  if (uploadSection && uploadGroupId) {
+    uploadGroupId.value = id;
+    uploadSection.classList.remove('d-none');
+  }
+
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function resetGroupForm() {
+  const form = document.getElementById('groupForm');
+  if (form) form.reset();
+
+  ['student_ids', 'teacher_ids'].forEach(id => {
+    const select = document.getElementById(id);
+    if (select) for (const option of select.options) option.selected = false;
+  });
+
+  const header = document.getElementById('groupFormHeader');
+  const modeText = document.getElementById('formModeText');
+  const modeIcon = document.getElementById('formModeIcon');
+  const cancelBtn = document.getElementById('cancelEditBtn');
+
+  header.classList.remove('bg-warning', 'text-dark');
+  header.classList.add('bg-success', 'text-white');
+  modeText.textContent = 'Add New Group';
+  modeIcon.textContent = '➕';
+  cancelBtn.classList.add('d-none');
+
+  const uploadSection = document.getElementById('bulkUploadSection');
+  if (uploadSection) uploadSection.classList.add('d-none');
+
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+</script>
+
+{% endblock %}

@@ -1,0 +1,350 @@
+{% extends "codingapp/base.html" %}
+{% load static %}
+{% load dict_extras %}
+{% block content %}
+
+<div class="container mt-4">
+  <h2 class="mb-3">🔐 Permissions — Manage by User</h2>
+
+  <!-- Search card (server-side filtering) -->
+  <div class="card mb-3 shadow-sm">
+    <div class="card-header bg-info text-dark">
+      <strong>🔍 Search Users</strong>
+    </div>
+    <div class="card-body">
+      <form method="GET" class="d-flex">
+        <input
+          type="text"
+          name="search"
+          value="{{ request.GET.search|default_if_none:'' }}"
+          class="form-control me-2"
+          placeholder="Search by username, email, role, or department..."
+          aria-label="Search users"
+        >
+        <button type="submit" class="btn btn-primary">Search</button>
+        {% if request.GET.search %}
+          <a href="{% url 'permissions_manage' %}" class="btn btn-secondary ms-2">Clear</a>
+        {% endif %}
+      </form>
+    </div>
+  </div>
+
+  {% for message in messages %}
+    <div class="alert alert-info">{{ message }}</div>
+  {% endfor %}
+
+  <div class="row gx-4">
+    <!-- LEFT: Users grouped by role -->
+    <div class="col-md-4 mb-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-header">
+          <strong>Users</strong>
+          <small class="text-muted ms-2">(click an entry to edit)</small>
+        </div>
+
+        <div class="card-body p-0">
+          <div class="accordion" id="userAccordion" style="max-height:64vh; overflow:auto;">
+            {% regroup users by role.name|default:"Unassigned" as grouped_users %}
+            {% for group in grouped_users %}
+              {% with gid=group.grouper|slugify %}
+              <div class="accordion-item">
+                <h2 class="accordion-header" id="heading-{{ gid }}">
+                  <button class="accordion-button collapsed" type="button"
+                          data-bs-toggle="collapse"
+                          data-bs-target="#collapse-{{ gid }}"
+                          aria-expanded="false"
+                          aria-controls="collapse-{{ gid }}">
+                    {{ group.grouper|title }}
+                    <span class="badge bg-secondary ms-2">{{ group.list|length }}</span>
+                  </button>
+                </h2>
+
+                <div id="collapse-{{ gid }}" class="accordion-collapse collapse"
+                     aria-labelledby="heading-{{ gid }}"
+                     data-bs-parent="#userAccordion">
+                  <div class="accordion-body p-0">
+                    <div class="list-group list-group-flush">
+                      {% for user in group.list %}
+                        <button type="button"
+                                class="list-group-item list-group-item-action d-flex justify-content-between align-items-center user-entry"
+                                data-user-id="{{ user.id }}"
+                                data-username="{{ user.user.username|escapejs }}"
+                                data-role="{{ user.role.name|default:'—'|escapejs }}"
+                                data-dept="{{ user.department.name|default:'—'|escapejs }}">
+                          <div>
+                            <strong>{{ user.user.username }}</strong>
+                            <div class="small text-muted">{{ user.department.name|default:"—" }}</div>
+                          </div>
+                          <span class="badge bg-dark">{{ user.user.email|default:"—" }}</span>
+                        </button>
+                      {% empty %}
+                        <div class="list-group-item text-muted">No users.</div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {% endwith %}
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Permission editor -->
+    <div class="col-md-8">
+      <div class="card shadow-sm h-100">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <div>
+            <strong id="selected-username">Select a user</strong>
+            <div class="small text-muted" id="selected-role">—</div>
+          </div>
+          <div>
+            <button id="select-all-btn" class="btn btn-sm btn-outline-primary me-2" disabled>Select all</button>
+            <button id="clear-all-btn" class="btn btn-sm btn-outline-secondary me-2" disabled>Clear all</button>
+            <button id="save-perms-btn" class="btn btn-sm btn-success" disabled>Save</button>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <p class="text-muted">Edit <strong>custom permissions</strong> for a user. Inherited (role) permissions are shown read-only on the left and cannot be changed here.</p>
+
+          <div class="row">
+            <!-- Inherited permissions -->
+            <div class="col-md-6 mb-3">
+              <div class="card bg-light text-dark h-100">
+                <div class="card-header"><strong>Inherited (Role) Permissions</strong></div>
+                <div class="card-body" style="max-height:52vh; overflow:auto;">
+                  <ul class="list-unstyled mb-0" id="inherited-perms">
+                    <li class="text-muted">Select a user to view inherited permissions.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- Custom permissions (editable) -->
+            <div class="col-md-6 mb-3">
+              <form id="custom-perms-form" method="POST" action="{% url 'permissions_manage' %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="update_user_perms">
+                <input type="hidden" name="user_id" id="form-user-id" value="">
+
+                <div class="card bg-light text-dark h-100">
+                  <div class="card-header d-flex justify-content-between align-items-center">
+                    <strong>Custom Permissions</strong>
+                    <div class="small text-muted">Select multiple (Shift/Ctrl) & click Save</div>
+                  </div>
+
+                  <div class="card-body" style="max-height:52vh; overflow:auto;">
+                    <div class="mb-2">
+                      <input type="search" id="perm-filter" class="form-control form-control-sm" placeholder="Filter permissions...">
+                    </div>
+
+                    <div id="custom-perms-list" class="d-flex flex-column gap-2">
+                      {# render each perm checkbox (initially unchecked). JS will mark/disable based on selected user #}
+                      {% for perm in permissions %}
+                        <div class="form-check permission-item" data-perm-id="{{ perm.id }}">
+                          <input class="form-check-input perm-checkbox" type="checkbox" name="perm_ids" value="{{ perm.id }}" id="perm-{{ perm.id }}">
+                          <label class="form-check-label" for="perm-{{ perm.id }}">
+                            {{ perm.name }} <small class="text-muted">({{ perm.code }})</small>
+                          </label>
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </div>
+
+                  <div class="card-footer">
+                    <small class="text-muted">Note: role-inherited permissions are displayed on the left and cannot be unchecked here. Saving replaces the user's custom permission set.</small>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div> <!-- row -->
+        </div> <!-- card-body -->
+      </div> <!-- card -->
+    </div> <!-- col -->
+  </div> <!-- row -->
+</div> <!-- container -->
+
+<!-- ========== JS: Wireup behavior ========== -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  // permission maps injected by view as JSON-strings and passed into template context:
+  // role_perm_json, custom_perm_json
+  let rolePermMap = {};
+  let customPermMap = {};
+  try {
+    rolePermMap = JSON.parse('{{ role_perm_json|escapejs }}' || '{}');
+  } catch (e) {
+    console.warn('Failed to parse role_perm_json', e);
+    rolePermMap = {};
+  }
+  try {
+    customPermMap = JSON.parse('{{ custom_perm_json|escapejs }}' || '{}');
+  } catch (e) {
+    console.warn('Failed to parse custom_perm_json', e);
+    customPermMap = {};
+  }
+
+  const userButtons = document.querySelectorAll('.user-entry');
+  const selectedUsername = document.getElementById('selected-username');
+  const selectedRole = document.getElementById('selected-role');
+  const inheritedList = document.getElementById('inherited-perms');
+  const customPermsList = document.getElementById('custom-perms-list');
+  const formUserId = document.getElementById('form-user-id');
+  const saveBtn = document.getElementById('save-perms-btn');
+  const selectAllBtn = document.getElementById('select-all-btn');
+  const clearAllBtn = document.getElementById('clear-all-btn');
+  const permFilter = document.getElementById('perm-filter');
+
+  let activeUserId = null;
+  let lastChecked = null; // for shift-selection inside permission list
+
+  // helper: show inherited perm ids for the user
+  function renderInherited(uid) {
+    inheritedList.innerHTML = '';
+    const ids = (rolePermMap[uid] || []).map(Number);
+    if (!ids.length) {
+      inheritedList.innerHTML = '<li class="text-muted">No inherited permissions for this role.</li>';
+      return;
+    }
+    ids.forEach(id => {
+      const item = customPermsList.querySelector('.permission-item[data-perm-id="'+id+'"]');
+      let labelText = item ? item.querySelector('label').innerHTML : ('Permission #' + id);
+      const li = document.createElement('li');
+      li.innerHTML = `<i class="bi bi-shield-lock-fill text-secondary me-2"></i>${labelText}`;
+      inheritedList.appendChild(li);
+    });
+  }
+
+  // helper: set custom checkboxes to reflect user's custom perms
+  function setCustomChecks(uid) {
+    const arr = (customPermMap[uid] || []).map(Number);
+    const setIds = new Set(arr);
+    customPermsList.querySelectorAll('.perm-checkbox').forEach(cb => {
+      cb.checked = setIds.has(Number(cb.value));
+      cb.disabled = false; // reset
+      cb.closest('.permission-item').querySelector('label').classList.remove('text-muted', 'fst-italic');
+    });
+    // disable and mark inherited ones
+    (rolePermMap[uid] || []).forEach(id => {
+      const el = customPermsList.querySelector('.permission-item[data-perm-id="'+id+'"]');
+      if (el) {
+        const cb = el.querySelector('.perm-checkbox');
+        cb.checked = true;
+        cb.disabled = true;
+        el.querySelector('label').classList.add('text-muted', 'fst-italic');
+      }
+    });
+  }
+
+  // wire user selection clicks
+  userButtons.forEach(btn => {
+    btn.addEventListener('click', function () {
+      // Remove active from others
+      userButtons.forEach(x => x.classList.remove('active'));
+      this.classList.add('active');
+
+      activeUserId = this.dataset.userId;
+      selectedUsername.textContent = this.dataset.username || '—';
+      selectedRole.textContent = this.dataset.role ? this.dataset.role + (this.dataset.dept ? ' • ' + this.dataset.dept : '') : '—';
+      formUserId.value = activeUserId;
+
+      // enable controls
+      saveBtn.removeAttribute('disabled');
+      selectAllBtn.removeAttribute('disabled');
+      clearAllBtn.removeAttribute('disabled');
+
+      renderInherited(activeUserId);
+      setCustomChecks(activeUserId);
+
+      // reset lastChecked for shift selection
+      lastChecked = null;
+    });
+  });
+
+  // SHIFT range selection for custom perms list
+  customPermsList.addEventListener('click', function(e) {
+    const target = e.target;
+    if (!target.classList.contains('perm-checkbox')) return;
+    if (e.shiftKey && lastChecked && lastChecked !== target) {
+      const checkboxes = Array.from(customPermsList.querySelectorAll('.perm-checkbox')).filter(cb => !cb.disabled);
+      const start = checkboxes.indexOf(lastChecked);
+      const end = checkboxes.indexOf(target);
+      if (start > -1 && end > -1) {
+        const min = Math.min(start, end);
+        const max = Math.max(start, end);
+        const setTo = lastChecked.checked;
+        for (let i = min; i <= max; i++) checkboxes[i].checked = setTo;
+      }
+    }
+    lastChecked = target;
+  });
+
+  // select all / clear all
+  selectAllBtn.addEventListener('click', function() {
+    customPermsList.querySelectorAll('.perm-checkbox').forEach(cb => {
+      if (!cb.disabled) cb.checked = true;
+    });
+  });
+  clearAllBtn.addEventListener('click', function() {
+    customPermsList.querySelectorAll('.perm-checkbox').forEach(cb => {
+      if (!cb.disabled) cb.checked = false;
+    });
+  });
+
+  // Save (submit form) — will post perm_ids (only checked inputs) and user_id
+  saveBtn.addEventListener('click', function () {
+    if (!activeUserId) { alert('Please select a user first.'); return; }
+    // ensure hidden field set
+    formUserId.value = activeUserId;
+    // submit the form
+    document.getElementById('custom-perms-form').submit();
+  });
+
+  // permission filter box
+  permFilter.addEventListener('input', function () {
+    const q = permFilter.value.trim().toLowerCase();
+    customPermsList.querySelectorAll('.permission-item').forEach(item => {
+      const lbl = item.querySelector('label').textContent.toLowerCase();
+      item.style.display = lbl.indexOf(q) !== -1 ? '' : 'none';
+    });
+  });
+
+  // Accessibility: keyboard nav — allow Enter on focused user-entry to select
+  userButtons.forEach(btn => {
+    btn.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        btn.click();
+      }
+    });
+  });
+
+  // If a search query exists and only one user is present, auto-select them
+  try {
+    const qs = new URLSearchParams(window.location.search);
+    const q = qs.get('search');
+    if (q) {
+      const visibleUsers = Array.from(document.querySelectorAll('.user-entry'));
+      if (visibleUsers.length === 1) visibleUsers[0].click();
+    }
+  } catch (err) {
+    // ignore
+  }
+});
+</script>
+
+<!-- ========== small style fixes ========== -->
+<style>
+/* make search highlight readable if used elsewhere */
+.user-entry.active, .user-entry[aria-pressed="true"] {
+  background-color: #fff3cd !important;
+  color: #000 !important;
+}
+
+/* make disabled/inherited labels visually muted */
+.permission-item label.text-muted.fst-italic { opacity: 0.8; }
+</style>
+
+{% endblock %}

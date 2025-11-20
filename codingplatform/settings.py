@@ -47,6 +47,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+MIDDLEWARE += ["codingapp.middleware.permission_middleware.RoleAccessMiddleware"]
 
 ROOT_URLCONF = 'codingplatform.urls'
 
@@ -61,7 +62,8 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
-                'codingapp.context_processors.unread_notice_count',  # ✅ Add custom context processor
+                'codingapp.context_processors.unread_notice_count',
+                'codingapp.context_processors.user_permissions_context',
             ],
         },
     },

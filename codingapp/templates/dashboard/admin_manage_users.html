@@ -1,0 +1,395 @@
+{% extends "codingapp/base.html" %}
+{% load static %}
+{% block content %}
+
+<div class="container mt-5">
+  <h2 class="mb-4 text-center">👥 Manage Users</h2>
+
+  {% for message in messages %}
+    <div class="alert alert-info">{{ message }}</div>
+  {% endfor %}
+
+  <!-- Add New User -->
+  <div class="card mb-5 shadow-sm">
+    <div class="card-header bg-success text-white">
+      <h5 class="mb-0">➕ Add New User</h5>
+    </div>
+    <div class="card-body">
+      <form method="POST">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_user">
+        <div class="row mb-3">
+          <div class="col-md-3">
+            <label class="form-label">Username</label>
+            <input type="text" name="username" class="form-control" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Email</label>
+            <input type="email" name="email" class="form-control">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Password</label>
+            <input type="password" name="password" class="form-control" required>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Role</label>
+            <select name="role_id" class="form-select">
+              <option value="">—</option>
+              {% for role in roles %}
+                <option value="{{ role.id }}">{{ role.name|title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Department</label>
+            <select name="dept_id" class="form-select">
+              <option value="">—</option>
+              {% for dept in departments %}
+                <option value="{{ dept.id }}">{{ dept.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-success">Add User</button>
+      </form>
+    </div>
+  </div>
+
+    <!-- Bulk Upload Users -->
+<div class="card mb-5 shadow-sm">
+  <div class="card-header bg-info text-white">
+    <h5 class="mb-0">📘 Bulk Upload Users (Excel)</h5>
+  </div>
+  <div class="card-body">
+    <form method="POST" enctype="multipart/form-data" action="{% url 'bulk_user_upload' %}">
+      {% csrf_token %}
+      <div class="mb-3">
+        <label class="form-label">Select Excel File (.xlsx or .xls)</label>
+        <input type="file" name="excel_file" accept=".xlsx,.xls" class="form-control" required>
+      </div>
+
+      <p class="text-muted small">
+        <strong>Excel Format:</strong> username, full_name, email, password, role, department, group<br>
+        Example:<br>
+        <code>john,Dr. John Smith,john@example.com,mypass123,Teacher,Computer Science,GroupA</code><br>
+        <code>alex,Alex Lee,alex@example.com,,Student,,</code> (department and group optional)
+      </p>
+
+      <button type="submit" class="btn btn-info">Upload Users</button>
+      <a href="{% url 'admin_manage_users' %}" class="btn btn-secondary ms-2">Back to Manage Users</a>
+    </form>
+  </div>
+</div>
+
+<!-- Search Users -->
+<div class="card mb-4 shadow-sm">
+  <div class="card-header bg-info text-dark">
+    <h5 class="mb-0">🔍 Search Users</h5>
+  </div>
+  <div class="card-body">
+    <form method="GET" class="d-flex">
+      <input
+        type="text"
+        name="search"
+        value="{{ request.GET.search|default_if_none:'' }}"
+        class="form-control me-2"
+        placeholder="Search by username, email, full name, or role..."
+      >
+      <button type="submit" class="btn btn-primary">Search</button>
+      {% if request.GET.search %}
+        <a href="{% url 'admin_manage_users' %}" class="btn btn-secondary ms-2">Clear</a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+
+  <!-- Existing Users -->
+  <div class="card shadow-sm">
+    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">📋 All Users</h5>
+    </div>
+    <div class="card-body">
+
+      <!-- Bulk form (only for bulk actions and checkboxes) -->
+      <form method="POST" id="bulkForm">
+        {% csrf_token %}
+
+        <!-- Select All -->
+        <div class="col-md-12 mb-3">
+          <label class="form-label">
+            <input type="checkbox" id="select-all"> Select All Users
+          </label>
+        </div>
+
+        <!-- Bulk Controls -->
+        <div class="row align-items-end mb-3">
+          <div class="col-md-4">
+            <label class="form-label">Change Role For Selected:</label>
+            <select name="bulk_role" class="form-select">
+              <option value="">— No Change —</option>
+              {% for role in roles %}
+                <option value="{{ role.id }}">{{ role.name|title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Change Department For Selected:</label>
+            <select name="bulk_dept" class="form-select">
+              <option value="">— No Change —</option>
+              {% for dept in departments %}
+                <option value="{{ dept.id }}">{{ dept.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <button type="submit" name="action" value="bulk_update" formnovalidate class="btn btn-warning w-100">Apply Bulk Update</button>
+            <button type="submit" name="action" value="bulk_activate" formnovalidate class="btn btn-success w-100 mt-2">Activate Selected</button>
+            <button type="submit" name="action" value="bulk_deactivate" formnovalidate class="btn btn-warning w-100 mt-2">Deactivate Selected</button>
+            <button type="submit" name="action" value="bulk_delete" formnovalidate class="btn btn-danger w-100 mt-2" onclick="return confirm('Delete all selected users?')">Delete Selected</button>
+          </div>
+        </div>
+
+        <hr>
+
+        <!-- Accordion Grouped by Departments and Roles -->
+        <div class="accordion" id="deptAccordion">
+          {% for dept_block in structured_data %}
+            {% with dept_id=dept_block.department.id|default:"none" %}
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="heading-{{ dept_id }}">
+                <button class="accordion-button collapsed" type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#collapse-{{ dept_id }}"
+                        aria-expanded="false"
+                        aria-controls="collapse-{{ dept_id }}">
+                  {% if dept_block.department %}
+                    {{ dept_block.department.name }}
+                  {% else %}
+                    🏷 Unassigned Department
+                  {% endif %}
+                </button>
+              </h2>
+
+              <div id="collapse-{{ dept_id }}" class="accordion-collapse collapse"
+                  aria-labelledby="heading-{{ dept_id }}" data-bs-parent="#deptAccordion">
+                <div class="accordion-body p-0">
+
+                  {% for role_block in dept_block.roles %}
+                    <div class="bg-dark text-white p-2 small fw-bold">{{ role_block.role_name }}</div>
+                    <table class="table table-sm table-hover mb-0 align-middle">
+                      <tbody>
+                        {% for u in role_block.users %}
+                        <tr>
+                          <td><input type="checkbox" name="selected_users" value="{{ u.id }}" class="user-checkbox"></td>
+                          <td>{{ u.user.username }}</td>
+                          <td>{{ u.user.email }}</td>
+                          <td>{{ u.role.name|default:"—" }}</td>
+                          <td>{{ u.department.name|default:"—" }}</td>
+                          <td style="min-width:340px;">
+
+                            <!-- Inline selects (no nested form) -->
+                            <div class="d-flex align-items-center gap-2 flex-wrap">
+                              <select id="role-select-{{ u.id }}" class="form-select form-select-sm" style="width:140px;">
+                                <option value="">—</option>
+                                {% for role in roles %}
+                                  <option value="{{ role.id }}" {% if u.role == role %}selected{% endif %}>{{ role.name|title }}</option>
+                                {% endfor %}
+                              </select>
+
+                              <select id="dept-select-{{ u.id }}" class="form-select form-select-sm" style="width:140px;">
+                                <option value="">—</option>
+                                {% for dept in departments %}
+                                  <option value="{{ dept.id }}" {% if u.department == dept %}selected{% endif %}>{{ dept.name }}</option>
+                                {% endfor %}
+                              </select>
+
+                              <button type="button" class="btn btn-sm btn-outline-primary" data-user-id="{{ u.id }}" onclick="submitUserUpdate(this.dataset.userId)">Update</button>
+                            </div>
+
+                            <div class="btn-group btn-group-sm mt-1 d-flex flex-wrap" role="group" style="gap:4px; margin-top:6px;">
+                              <!-- Toggle active via JS -->
+                              <button type="button" class="btn btn-outline-{{ u.user.is_active|yesno:'warning,success' }}" data-user-id="{{ u.id }}" onclick="postAction({ action: 'toggle_active', user_id: this.dataset.userId })">
+                                {% if u.user.is_active %}Deactivate{% else %}Activate{% endif %}
+                              </button>
+
+                              <!-- Reset password (opens modal) -->
+                              <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#resetModal-{{ u.id }}">Reset Password</button>
+
+                              <!-- Delete via JS (confirm) -->
+                              <button type="button" class="btn btn-outline-danger" onclick="confirmDelete('{{ u.id }}', '{{ u.user.username }}')">Delete</button>
+                            </div>
+
+                            <!-- Reset Password Modal (modal contains input only; submit handled by JS) -->
+                            <div class="modal fade" id="resetModal-{{ u.id }}" tabindex="-1" aria-labelledby="resetModalLabel-{{ u.id }}" aria-hidden="true">
+                              <div class="modal-dialog modal-dialog-centered">
+                                <div class="modal-content text-dark">
+                                  <div class="modal-header">
+                                    <h5 class="modal-title" id="resetModalLabel-{{ u.id }}">Reset Password: {{ u.user.username }}</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                  </div>
+                                  <div class="modal-body">
+                                    <div class="mb-2">
+                                      <label class="form-label">New Password</label>
+                                      <input id="reset-pass-{{ u.id }}" type="password" class="form-control" minlength="6" required>
+                                    </div>
+                                  </div>
+                                  <div class="modal-footer">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="button" class="btn btn-primary" onclick="submitResetPassword('{{ u.id }}')">Reset Password</button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                          </td>
+                        </tr>
+                        {% empty %}
+                          <tr><td colspan="6" class="text-muted text-center">No users.</td></tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  {% endfor %}
+
+                </div>
+              </div>
+            </div>
+            {% endwith %}
+          {% empty %}
+            <div class="alert alert-warning m-3">No departments or users found.</div>
+          {% endfor %}
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SCRIPTS ================= -->
+<script>
+// CSRF helper (reads cookie)
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+const csrftoken = getCookie('csrftoken');
+
+// Generic POST helper using fetch, sends form-urlencoded, reloads on success
+function postAction(payload) {
+  // payload: object containing keys to send, e.g. {action:'toggle_active', user_id:'3'}
+  const body = new URLSearchParams();
+  for (const k in payload) {
+    body.append(k, payload[k]);
+  }
+
+  return fetch(window.location.pathname, {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': csrftoken,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: body.toString(),
+    credentials: 'same-origin'
+  })
+  .then(resp => {
+    // If server redirects, follow
+    if (resp.redirected) {
+      window.location.href = resp.url;
+      return;
+    }
+    if (!resp.ok) {
+      return resp.text().then(t => { throw new Error(t || resp.statusText); });
+    }
+    // reload to show updated state
+    window.location.reload();
+  })
+  .catch(err => {
+    console.error("Request failed:", err);
+    alert("Action failed — check console for details.");
+  });
+}
+
+
+// Per-user update (reads selects, sends update_user)
+function submitUserUpdate(userId) {
+  const roleSel = document.getElementById(`role-select-${userId}`);
+  const deptSel = document.getElementById(`dept-select-${userId}`);
+  const data = { action: 'update_user', user_id: userId };
+  if (roleSel && roleSel.value) data.role_id = roleSel.value;
+  if (deptSel && deptSel.value) data.dept_id = deptSel.value;
+  postAction(data);
+}
+
+// Confirm delete then send delete_user
+function confirmDelete(userId, username) {
+  if (!confirm(`Delete ${username} permanently?`)) return;
+  postAction({ action: 'delete_user', user_id: userId });
+}
+
+// Submit reset password from modal
+function submitResetPassword(userId) {
+  const passInput = document.getElementById(`reset-pass-${userId}`);
+  if (!passInput || !passInput.value || passInput.value.length < 6) {
+    alert("Enter a password of at least 6 characters.");
+    return;
+  }
+  postAction({ action: 'reset_password', user_id: userId, new_password: passInput.value });
+}
+
+// Shift-click and select-all script
+document.addEventListener("DOMContentLoaded", function() {
+  const checkboxes = Array.from(document.querySelectorAll('.user-checkbox'));
+  const selectAll = document.getElementById('select-all');
+  let lastChecked = null;
+
+  if (selectAll) {
+    selectAll.addEventListener('click', function() {
+      checkboxes.forEach(cb => {
+        cb.checked = this.checked;
+        const row = cb.closest('tr');
+        if (row) row.classList.toggle('table-active', cb.checked);
+      });
+    });
+  }
+
+  checkboxes.forEach(cb => {
+    cb.addEventListener('click', function(e) {
+      if (e.shiftKey && lastChecked) {
+        let inBetween = false;
+        checkboxes.forEach(c => {
+          if (c === this || c === lastChecked) inBetween = !inBetween;
+          if (inBetween) c.checked = lastChecked.checked;
+        });
+      }
+      lastChecked = this;
+      const row = cb.closest('tr');
+      if (row) row.classList.toggle('table-active', cb.checked);
+    });
+  });
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  const q = "{{ request.GET.search|default:'' }}".toLowerCase();
+  if (!q) return;
+  document.querySelectorAll("td").forEach(td => {
+    const text = td.textContent;
+    if (text.toLowerCase().includes(q)) {
+      td.innerHTML = text.replace(
+        new RegExp(q, "gi"),
+        match => `<mark style="background: #ffea00">${match}</mark>`
+      );
+    }
+  });
+});
+</script>
+<style>
+mark {
+  background-color: #ffee58 !important; /* soft yellow highlight */
+  color: #000 !important; /* make text black for visibility */
+  padding: 0 2px;
+  border-radius: 2px;
+}
+</style>
+
+{% endblock %}

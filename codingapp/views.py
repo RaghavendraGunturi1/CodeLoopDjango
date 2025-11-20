@@ -24,6 +24,11 @@ from .models import (
 )
 from .forms import ModuleForm, QuestionForm
 from codingapp import models
+from codingapp.models import Department, Role, ActionPermission, UserProfile
+from codingapp.utils import get_user_accessible_groups
+from codingapp.utils import is_teacher, is_hod, is_admin, has_role
+
+
 
 # Piston (code execution) API endpoint
 #PISTON_API_URL = "https://emkc.org/api/v2/piston/execute"
@@ -207,6 +212,7 @@ from .forms import ModuleForm, QuestionForm
 
 @login_required
 def module_list(request):
+<<<<<<< HEAD
     if request.user.is_staff:
         # Staff members can see all modules
         modules = Module.objects.all().order_by('title')
@@ -229,6 +235,11 @@ def module_list(request):
         'completed_modules': completed_modules,
     }
     return render(request, 'codingapp/module_list.html', context)
+=======
+    accessible_groups = get_user_accessible_groups(request.user)
+    mods = Module.objects.filter(groups__in=accessible_groups).distinct()
+    return render(request, 'codingapp/module_list.html', {'modules': mods})
+>>>>>>> b980e73c86f546779e855c649cbd39afa579f86c
 
 
 from .models import ModuleCompletion # Make sure this is imported at the top
@@ -236,8 +247,14 @@ from .models import ModuleCompletion # Make sure this is imported at the top
 @login_required
 def module_detail(request, module_id):
     module = get_object_or_404(Module, id=module_id)
+<<<<<<< HEAD
 
     # ⭐ UPDATED PERMISSION CHECK
+=======
+    denied = deny_access_if_not_allowed(request, module)
+    if denied: 
+        return denied
+>>>>>>> b980e73c86f546779e855c649cbd39afa579f86c
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
         # A student can access if the module is public OR if they are in an assigned group.
@@ -269,8 +286,9 @@ def module_detail(request, module_id):
     })
 
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def add_module(request):
+<<<<<<< HEAD
     if request.method == 'POST':
         form = ModuleForm(request.POST)
         if form.is_valid():
@@ -292,8 +310,19 @@ def add_module(request):
         form = ModuleForm()
         
     return render(request, "codingapp/module_form.html", {"form": form, "action": "Add"})
+=======
+    form = ModuleForm(request.POST or None)
+    if not request.user.is_staff:
+        form.fields['groups'].queryset = request.user.custom_groups.all()
+    else:
+        form.fields['groups'].queryset = Group.objects.all()
+    if form.is_valid():
+        form.save()
+        return redirect("module_list")
+    return render(request, "codingapp/module_form.html", {"form": form})
+>>>>>>> b980e73c86f546779e855c649cbd39afa579f86c
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def edit_module(request, module_id):
     mod = get_object_or_404(Module, id=module_id)
     if request.method == 'POST':
@@ -307,7 +336,7 @@ def edit_module(request, module_id):
         
     return render(request, "codingapp/module_form.html", {"form": form, "action": "Edit"})
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def delete_module(request, module_id):
     mod = get_object_or_404(Module, id=module_id)
     if request.method == "POST":
@@ -317,107 +346,161 @@ def delete_module(request, module_id):
 
 @login_required
 def question_list(request):
-    if request.user.is_staff:
-        qs = Question.objects.filter(question_type="coding")
-    else:
-        user_groups = request.user.custom_groups.all()
-        modules = Module.objects.filter(groups__in=user_groups).distinct()
-        qs = Question.objects.filter(module__in=modules).distinct()
+    accessible_groups = get_user_accessible_groups(request.user)
+    modules = Module.objects.filter(groups__in=accessible_groups).distinct()
+    qs = Question.objects.filter(module__in=modules, question_type="coding").distinct()
+
     return render(request, 'codingapp/question_list.html', {'questions': qs})
+
 
 @login_required
 def question_detail(request, pk):
-    q = get_object_or_404(Question, pk=pk)
+    from celery.result import AsyncResult
+    import json
+    from django.conf import settings
 
+    q = get_object_or_404(Question, pk=pk)
+    denied = deny_access_if_not_allowed(request, q.module)
+    if denied:
+        return denied
+
+    # --- Access control ---
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
         if not q.module or not q.module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
-    # Variables for managing the asynchronous state
-    task_id = request.session.get(f'submission_task_id_{pk}')
+    # -------------------------
+    # Initialize variables
+    # -------------------------
     results = None
     error = None
-    
-    # Get last saved code/language from session or last submission
-    code = request.session.get(f'code_{pk}', '')
-    lang = request.session.get(f'language_{pk}', 'python')
 
-    # 1. Handle submission attempt (POST)
+    # --- Determine currently selected language ---
+    if request.method == "POST":
+        selected_lang = request.POST.get("language", "python")
+    else:
+        selected_lang = request.session.get(f'last_language_{pk}', request.session.get(f'language_{pk}', 'python'))
+
+    # Session key patterns (store separately for each language)
+    session_code_key = f'code_{pk}_{selected_lang}'
+    session_task_key = f'submission_task_id_{pk}_{selected_lang}'
+
+    # Load existing task/code from session (if any)
+    task_id = request.session.get(session_task_key)
+    code = request.session.get(session_code_key, '')
+
+    # -------------------------
+    # 1️⃣ Handle Submission (POST)
+    # -------------------------
     if request.method == "POST":
         code = request.POST.get("code", "").strip()
         lang = request.POST.get("language", "python")
-        
+
         if not code:
-            messages.error(request, "Code cannot be empty")
+            messages.error(request, "Code cannot be empty.")
         else:
-            # ⭐ ASYNCHRONOUS CALL: Enqueue the code execution task
+            # ⭐ Run async submission
             task = process_practice_submission.delay(request.user.id, q.id, code, lang)
-            
-            # Store task ID and code/lang for session tracking
-            request.session[f'submission_task_id_{pk}'] = task.id
-            request.session[f'code_{pk}'] = code
+
+            # Save per-language info in session
+            request.session[f'submission_task_id_{pk}_{lang}'] = task.id
+            request.session[f'code_{pk}_{lang}'] = code
+            request.session[f'last_language_{pk}'] = lang
             request.session[f'language_{pk}'] = lang
             request.session.modified = True
 
             messages.info(request, "Your code is being processed in the background. Please wait or check back shortly.")
-            # Redirect immediately to prevent synchronous waiting
             return redirect('question_detail', pk=pk)
 
-    # 2. Handle status check and display results (GET)
+    # -------------------------
+    # 2️⃣ Handle async task status (GET)
+    # -------------------------
     if task_id:
         task_result = AsyncResult(task_id)
-        
+
         if task_result.ready():
-            # Task finished, retrieve result and clean up
-            request.session.pop(f'submission_task_id_{pk}', None)
+            # Remove task marker once finished
+            request.session.pop(session_task_key, None)
             request.session.modified = True
-            
-            # Fetch the updated submission object (saved by the Celery task)
-            latest_submission = Submission.objects.filter(user=request.user, question=q).order_by('-submitted_at').first()
-            
+
+            # Fetch last DB submission for this language
+            latest_submission = Submission.objects.filter(
+                user=request.user,
+                question=q,
+                language=selected_lang
+            ).order_by('-submitted_at').first()
+
             if latest_submission:
-                # The 'output' field now contains the JSON list of test case results
                 try:
-                    results = json.loads(latest_submission.output)
+                    results = json.loads(latest_submission.output) if latest_submission.output else None
                 except json.JSONDecodeError:
                     results = None
-                
-                # Set dynamic messages based on the final status
+
                 if latest_submission.status == "Accepted":
-                    messages.success(request, "Code Accepted! All test cases passed.")
-                elif latest_submission.status == 'Error':
-                    messages.error(request, f"Code Execution Error: {latest_submission.error}")
-                    error = latest_submission.error # Pass error to context for display
-                else: # Rejected or Pending (if something went wrong with status setting)
-                    messages.warning(request, "Code Rejected. Some test cases failed.")
-            
-            task_id = None # Task is resolved
+                    messages.success(request, "✅ Code Accepted! All test cases passed.")
+                elif latest_submission.status == "Error":
+                    messages.error(request, f"❌ Code Execution Error: {latest_submission.error}")
+                    error = latest_submission.error
+                else:
+                    messages.warning(request, "⚠️ Some test cases failed. Try again.")
+            task_id = None
 
         else:
-            # Task is still running
-            messages.info(request, f"Code submission is processing... Status: {task_result.status}")
+            messages.info(request, f"Submission is processing... Status: {task_result.status}")
 
-    # 3. Load initial code/last submission code for editor if nothing is in session/results
+    # -------------------------
+    # 3️⃣ Load code if not in session
+    # -------------------------
     if not code:
-        last_submission = Submission.objects.filter(user=request.user, question=q).order_by('-submitted_at').first()
+        last_submission = Submission.objects.filter(
+            user=request.user,
+            question=q,
+            language=selected_lang
+        ).order_by('-submitted_at').first()
+
         if last_submission:
-            code, lang = last_submission.code, last_submission.language
+            code = last_submission.code
             if not results and last_submission.output:
                 try:
                     results = json.loads(last_submission.output)
                 except json.JSONDecodeError:
                     pass
 
-    return render(request, "codingapp/question_detail.html", {
+    # -------------------------
+    # 4️⃣ Build user_submissions map (for all languages)
+    # -------------------------
+    # Collect DB submissions
+    db_codes = {
+        s.language: s.code
+        for s in Submission.objects.filter(user=request.user, question=q)
+    }
+
+    # Merge with session codes (to include unsaved async submissions)
+    session_codes = {}
+    for key, val in request.session.items():
+        if key.startswith(f'code_{pk}_'):
+            lang_name = key.split(f'code_{pk}_', 1)[1]
+            session_codes[lang_name] = val
+
+    user_submissions = {**db_codes, **session_codes}
+
+    # -------------------------
+    # 5️⃣ Prepare context and render
+    # -------------------------
+    context = {
         "question": q,
         "code": code,
-        "selected_language": lang,
+        "selected_language": selected_lang,
         "results": results,
         "error": error,
-        "task_id": task_id, # Pass task_id to the template for client-side polling
-        "supported_languages": settings.SUPPORTED_LANGUAGES, 
-    })
+        "task_id": task_id,
+        "supported_languages": settings.SUPPORTED_LANGUAGES,
+        "user_submissions": user_submissions,
+    }
+
+    return render(request, "codingapp/question_detail.html", context)
+
 
 from django.views.decorators.http import require_POST
 from .models import Module, ModuleCompletion, Submission
@@ -456,7 +539,7 @@ def mark_module_completed(request, module_id):
 from .forms import QuestionForm, TestCaseForm
 from django.forms import formset_factory
 from django.contrib.admin.views.decorators import staff_member_required
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def add_question_to_module(request, module_id):
     mod = get_object_or_404(Module, id=module_id)
     TestCaseFormSet = formset_factory(TestCaseForm, extra=1, can_delete=True)
@@ -507,11 +590,9 @@ from django.utils import timezone
 @login_required
 def assessment_list(request):
     now = timezone.now()
-    if request.user.is_staff:
-        asses = Assessment.objects.filter(end_time__gte=now)
-    else:
-        user_groups = request.user.custom_groups.all()
-        asses = Assessment.objects.filter(end_time__gte=now, groups__in=user_groups).distinct()
+    accessible_groups = get_user_accessible_groups(request.user)
+    asses = Assessment.objects.filter(end_time__gte=now, groups__in=accessible_groups).distinct()
+
     return render(request, 'codingapp/assessment_list.html', {"assessments": asses})
 
 from django.shortcuts import render, get_object_or_404, redirect
@@ -727,111 +808,178 @@ from django.contrib.auth.decorators import login_required
 
 @login_required
 def submit_assessment_code(request, assessment_id, question_id):
+    # kept local imports (as in your style)
+    from celery.result import AsyncResult
+    import json
+    from django.conf import settings
+    from django.db.models import Max
+
     assessment = get_object_or_404(Assessment, id=assessment_id)
+    denied = deny_access_if_not_allowed(request, assessment)
+    if denied:
+        return denied
     current_question_obj = get_object_or_404(Question, id=question_id)
 
-    # Permission checks (kept as is)
+    # ✅ Permission check (unchanged)
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
         if not assessment.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
     session = get_object_or_404(AssessmentSession, user=request.user, assessment=assessment)
+
     if assessment.quiz and not session.quiz_submitted:
         messages.error(request, "You must complete the quiz section before accessing coding questions.")
         return redirect('assessment_detail', assessment_id=assessment.id)
 
+    # Timing logic
     deadline = session.start_time + timezone.timedelta(minutes=assessment.duration_minutes)
     read_only = timezone.now() > deadline
 
-    # Variables for managing asynchronous state and results
-    task_id = request.session.get(f'assessment_task_id_{assessment_id}_{question_id}')
+    # ===============================
+    # Multi-language setup
+    # ===============================
+    # Determine selected language (POST wins, else session fallback)
+    if request.method == "POST":
+        selected_lang = request.POST.get("language", "python")
+    else:
+        selected_lang = request.session.get(
+            f'assessment_lang_{assessment_id}_{question_id}',
+            'python'
+        )
+
+    # Define per-language session keys
+    session_code_key = f'assessment_code_{assessment_id}_{question_id}_{selected_lang}'
+    session_task_key = f'assessment_task_id_{assessment_id}_{question_id}_{selected_lang}'
+
+    # Load current task/code if available
+    task_id = request.session.get(session_task_key)
+    code = request.session.get(session_code_key, '')
+
     submission_results = None
     latest_submission = None
 
-    # 1. Handle POST request (Submission)
+    # ===============================
+    # 1️⃣ Handle POST (submission)
+    # ===============================
     if request.method == "POST" and not read_only:
         code = request.POST.get("code", "").strip()
         lang = request.POST.get("language", "python")
-        
+
         if not code:
             messages.error(request, "Code cannot be empty.")
         else:
-            # ⭐ ASYNCHRONOUS CALL: Enqueue the assessment submission task
+            # ⭐ Async submission
             task = process_assessment_submission.delay(
                 request.user.id, assessment.id, current_question_obj.id, code, lang
             )
-            
-            # Store task ID and new code/lang in session
-            request.session[f'assessment_task_id_{assessment_id}_{question_id}'] = task.id
-            request.session['assessment_code'] = code # Store code temporarily in session
-            request.session['assessment_lang'] = lang # Store lang temporarily in session
+
+            # Store per-language info in session (so switching languages restores quickly)
+            request.session[f'assessment_task_id_{assessment_id}_{question_id}_{lang}'] = task.id
+            request.session[f'assessment_code_{assessment_id}_{question_id}_{lang}'] = code
+            request.session[f'assessment_lang_{assessment_id}_{question_id}'] = lang
             request.session.modified = True
-            
+
             messages.info(request, "Submission is being processed in the background.")
-            # Redirect immediately to show loading/pending state
             return redirect('submit_assessment_code', assessment_id=assessment.id, question_id=question_id)
 
-    # 2. Handle GET request (Status Check and Display)
-
-    # First, try to get the latest submission from the database
-    latest_submission = AssessmentSubmission.objects.filter(
-        assessment=assessment, question=current_question_obj, user=request.user
-    ).order_by('-submitted_at').first()
-
+    # ===============================
+    # 2️⃣ Handle GET (status + results)
+    # ===============================
     if task_id:
         task_result = AsyncResult(task_id)
-        
         if task_result.ready():
-            # Task finished, retrieve result and clean up
-            request.session.pop(f'assessment_task_id_{assessment_id}_{question_id}', None)
+            # remove session task id for this language (task finished)
+            request.session.pop(session_task_key, None)
             request.session.modified = True
-            
-            # Re-fetch submission to get the updated status and output from the task
+
+            # Refetch latest submission for this language
             latest_submission = AssessmentSubmission.objects.filter(
-                assessment=assessment, question=current_question_obj, user=request.user
+                assessment=assessment,
+                question=current_question_obj,
+                user=request.user,
+                language=selected_lang
             ).order_by('-submitted_at').first()
-            
+
             if latest_submission and latest_submission.output:
                 try:
-                    # Output field contains JSON list of test results
                     submission_results = json.loads(latest_submission.output)
                 except json.JSONDecodeError:
                     submission_results = None
-                
-                # Set dynamic messages based on the final status
+
                 if latest_submission.score == len(current_question_obj.test_cases):
-                    messages.success(request, "Code Accepted! All test cases passed.")
+                    messages.success(request, "✅ Code Accepted! All test cases passed.")
                 elif latest_submission.error:
-                    messages.error(request, f"Code Execution Error: {latest_submission.error}")
+                    messages.error(request, f"❌ Code Execution Error: {latest_submission.error}")
                 else:
-                    messages.warning(request, "Code Rejected. Some test cases failed.")
+                    messages.warning(request, "⚠️ Some test cases failed.")
         else:
-            # Task is still running
             messages.info(request, f"Submission is processing... Status: {task_result.status}")
 
-    # 3. Prepare data for rendering the template
-    
-    # Load code/lang from latest submission or session (for pending task)
-    code = latest_submission.code if latest_submission else request.session.get('assessment_code', "")
-    lang = latest_submission.language if latest_submission else request.session.get('assessment_lang', 'python')
+    # ===============================
+    # 3️⃣ Load latest code for editor (session-first, then DB filtered by language)
+    # ===============================
+    if not code:
+        latest_submission = AssessmentSubmission.objects.filter(
+            assessment=assessment,
+            question=current_question_obj,
+            user=request.user,
+            language=selected_lang
+        ).order_by('-submitted_at').first()
 
-    is_fully_solved = latest_submission and latest_submission.score == len(current_question_obj.test_cases)
+        if latest_submission:
+            code = latest_submission.code
+            if latest_submission.output and not submission_results:
+                try:
+                    submission_results = json.loads(latest_submission.output)
+                except json.JSONDecodeError:
+                    pass
+
+    # ===============================
+    # 4️⃣ Determine read-only state (robust)
+    #    lock if either deadline passed OR user has full score in ANY language
+    # ===============================
+    # Get best score across all languages for this user/question
+    best_score_agg = AssessmentSubmission.objects.filter(
+        assessment=assessment,
+        question=current_question_obj,
+        user=request.user
+    ).aggregate(best=Max('score'))
+    best_score = (best_score_agg.get('best') or 0)
+
+    is_fully_solved = (best_score == len(current_question_obj.test_cases))
     final_read_only = read_only or is_fully_solved
 
-    # Use existing submission results if available (for page reloads after completion)
-    if latest_submission and not submission_results and latest_submission.output:
-         try:
-            submission_results = json.loads(latest_submission.output)
-         except json.JSONDecodeError:
-            pass
+    # ===============================
+    # 5️⃣ Build user_submissions map (DB + session) so language switching restores instantly
+    # ===============================
+    db_codes = {
+        s.language: s.code
+        for s in AssessmentSubmission.objects.filter(
+            user=request.user,
+            assessment=assessment,
+            question=current_question_obj
+        )
+    }
 
+    session_codes = {}
+    prefix = f'assessment_code_{assessment_id}_{question_id}_'
+    for key, val in request.session.items():
+        if key.startswith(prefix):
+            lang_name = key[len(prefix):]
+            session_codes[lang_name] = val
 
-    # Prepare data for the question navigation bar (kept as is)
+    user_submissions = {**db_codes, **session_codes}
+
+    # ===============================
+    # 6️⃣ Navigation Bar
+    # ===============================
     all_qs = AssessmentQuestion.objects.filter(assessment=assessment).select_related('question').order_by('order')
     nav_questions = []
     for aq in all_qs:
-        sub = AssessmentSubmission.objects.filter(assessment=assessment, question=aq.question, user=request.user).first()
+        sub = AssessmentSubmission.objects.filter(
+            assessment=assessment, question=aq.question, user=request.user
+        ).first()
         is_solved = sub and sub.score == len(aq.question.test_cases)
         is_attempted = sub is not None
         nav_questions.append({
@@ -840,30 +988,33 @@ def submit_assessment_code(request, assessment_id, question_id):
             'is_attempted': is_attempted,
         })
 
+    # ===============================
+    # 7️⃣ Render Context
+    # ===============================
     context = {
         "assessment": assessment,
         "question": current_question_obj,
         "code": code,
-        "selected_language": lang,
+        "selected_language": selected_lang,
         "supported_languages": settings.SUPPORTED_LANGUAGES,
         "read_only": final_read_only,
         "end_time": deadline.isoformat(),
         "all_questions": nav_questions,
         "results": submission_results,
-        "task_id": task_id, # Pass task_id to the template for client-side polling
-        "focus_mode": True, # 👈 ADD THIS LINE
+        "task_id": task_id,
+        "focus_mode": True,
+        "user_submissions": user_submissions,
     }
+
     return render(request, "codingapp/submit_assessment_code.html", context)
-    
+
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import user_passes_test
 from .models import Module
 from .forms import ModuleForm
 
-def is_teacher(user):
-    return user.is_staff or user.groups.filter(name="Teachers").exists()
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_module_list(request):
     modules = Module.objects.all()
     return render(request, 'codingapp/teacher_module_list.html', {'modules': modules})
@@ -874,7 +1025,7 @@ from django.forms import inlineformset_factory
 from .models import Module, Question
 from .forms import ModuleForm, QuestionForm
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_add_module(request):
     # Inline formset for questions (no instance yet, so use 'None')
     QuestionFormSet = inlineformset_factory(
@@ -914,7 +1065,7 @@ from django.forms import inlineformset_factory
 from .models import Module, Question
 from .forms import ModuleForm, QuestionForm
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_edit_module(request, module_id):
     module = get_object_or_404(Module, id=module_id)
     
@@ -944,7 +1095,7 @@ def teacher_edit_module(request, module_id):
         "module": module,
     })
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_delete_module(request, module_id):
     module = get_object_or_404(Module, id=module_id)
     if request.method == "POST":
@@ -952,7 +1103,7 @@ def teacher_delete_module(request, module_id):
         return redirect('teacher_module_list')
     return render(request, 'codingapp/teacher_module_confirm_delete.html', {'module': module})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_dashboard(request):
     # You can add stats, recent activity, etc.
     return render(request, 'codingapp/teacher_dashboard.html')
@@ -960,7 +1111,7 @@ def teacher_dashboard(request):
 from .models import Question
 from .forms import QuestionForm
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_question_list(request):
     questions = Question.objects.filter()
     return render(request, 'codingapp/teacher_question_list.html', {'questions': questions})
@@ -973,7 +1124,7 @@ from .models import Question
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render, redirect, get_object_or_404
 
-@staff_member_required
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_question_form(request, question_id=None):
     question = get_object_or_404(Question, id=question_id) if question_id else None
 
@@ -1020,7 +1171,7 @@ def teacher_question_form(request, question_id=None):
     })
 
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_delete_question(request, question_id):
     question = get_object_or_404(Question, id=question_id)
     if request.method == "POST":
@@ -1031,7 +1182,7 @@ def teacher_delete_question(request, question_id):
 from .models import Assessment
 from .forms import AssessmentForm  # You'll need to create this form
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_assessment_list(request):
     assessments = Assessment.objects.all()
     return render(request, 'codingapp/teacher_assessment_list.html', {'assessments': assessments})
@@ -1041,10 +1192,8 @@ from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import user_passes_test
 from .models import Assessment, AssessmentQuestion # It's good practice to import models you work with
 
-def is_teacher(user):
-    return user.is_staff
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_add_assessment(request):
     if request.method == "POST":
         form = AssessmentForm(request.POST)
@@ -1067,7 +1216,7 @@ def teacher_add_assessment(request):
         
     return render(request, 'codingapp/teacher_assessment_form.html', {'form': form, 'action': 'Add'})
     
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_edit_assessment(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
     if request.method == "POST":
@@ -1105,7 +1254,7 @@ def teacher_edit_assessment(request, assessment_id):
         'assessment': assessment
     })
     
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_delete_assessment(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
     if request.method == "POST":
@@ -1116,12 +1265,12 @@ def teacher_delete_assessment(request, assessment_id):
 from .models import Group
 from .forms import GroupForm
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_group_list(request):
     groups = Group.objects.all()
     return render(request, 'codingapp/teacher_group_list.html', {'groups': groups})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_add_group(request):
     if request.method == "POST":
         form = GroupForm(request.POST)
@@ -1132,7 +1281,7 @@ def teacher_add_group(request):
         form = GroupForm()
     return render(request, 'codingapp/teacher_group_form.html', {'form': form, 'action': 'Add'})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_edit_group(request, group_id):
     group = get_object_or_404(Group, id=group_id)
     if request.method == "POST":
@@ -1144,7 +1293,7 @@ def teacher_edit_group(request, group_id):
         form = GroupForm(instance=group)
     return render(request, 'codingapp/teacher_group_form.html', {'form': form, 'action': 'Edit'})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_delete_group(request, group_id):
     group = get_object_or_404(Group, id=group_id)
     if request.method == "POST":
@@ -1157,52 +1306,112 @@ from django.contrib.auth.models import User
 from django.shortcuts import render, redirect
 from django.contrib import messages
 
+from django.shortcuts import render, redirect
+from django.contrib import messages
 from django.contrib.auth.models import User
-from .models import UserProfile, Group
 from django.contrib.auth.decorators import user_passes_test
 import openpyxl
+from .models import UserProfile, Role, Department, Group
 
-@user_passes_test(lambda u: u.is_staff)
+
+@user_passes_test(lambda u: hasattr(u, "userprofile") and u.userprofile.role and u.userprofile.role.name.lower() == "admin")
 def bulk_user_upload(request):
+    """
+    Allows admin to upload users in bulk from an Excel file (.xlsx or .xls).
+    Supports columns: username, full_name, email, password, role, department, group.
+    Department is optional.
+    """
     result = None
+
     if request.method == "POST" and request.FILES.get("excel_file"):
         excel_file = request.FILES["excel_file"]
-        wb = openpyxl.load_workbook(excel_file)
-        ws = wb.active
-        headers = [cell.value for cell in ws[1]]
-        expected_headers = ["username", "full_name", "email", "password", "group"]
-        if any(h not in headers for h in expected_headers):
-            result = {"created": 0, "skipped": 0, "errors": ["Invalid headers. Expected: " + ", ".join(expected_headers)]}
-        else:
-            created = skipped = 0
-            errors = []
-            for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-                row_data = dict(zip(headers, row))
-                username = str(row_data.get("username")).strip() if row_data.get("username") else None
-                full_name = row_data.get("full_name", "").strip()
-                email = row_data.get("email", "").strip()
-                password = row_data.get("password", "").strip()
-                group_name = row_data.get("group", "").strip()
-                if not username or not password or not email:
-                    errors.append(f"Row {i}: Missing username/password/email.")
+
+        try:
+            wb = openpyxl.load_workbook(excel_file)
+            ws = wb.active
+        except Exception as e:
+            messages.error(request, f"Error reading Excel file: {e}")
+            return redirect("admin_manage_users")
+
+        # Expected headers (now includes optional 'department')
+        headers = [str(cell.value).strip().lower() if cell.value else "" for cell in ws[1]]
+        expected_headers = ["username", "full_name", "email", "password", "role", "department", "group"]
+
+        # Validate headers (at least required ones)
+        required_headers = ["username", "email", "password", "role"]
+        if any(h not in headers for h in required_headers):
+            messages.error(
+                request,
+                f"Invalid headers. Required: {', '.join(required_headers)} | "
+                f"Optional: department, group"
+            )
+            return redirect("admin_manage_users")
+
+        created = skipped = 0
+        errors = []
+
+        # Get index mapping for flexible column order
+        col_index = {h: headers.index(h) for h in headers if h}
+
+        for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            try:
+                username = str(row[col_index.get("username")]).strip() if row[col_index.get("username")] else None
+                email = (row[col_index.get("email")] or "").strip()
+                password = (row[col_index.get("password")] or "").strip() or "password123"
+                full_name = (row[col_index.get("full_name")] or "").strip()
+                role_name = (row[col_index.get("role")] or "").strip()
+                dept_name = (row[col_index.get("department")] or "").strip() if "department" in col_index else ""
+                group_name = (row[col_index.get("group")] or "").strip() if "group" in col_index else ""
+
+                if not username or not email or not password:
+                    errors.append(f"Row {i}: Missing required fields.")
                     continue
+
                 if User.objects.filter(username=username).exists():
                     skipped += 1
                     continue
-                try:
-                    user = User.objects.create_user(username=username, email=email, password=password)
-                    user_profile, _ = UserProfile.objects.get_or_create(user=user)
-                    user_profile.full_name = full_name
-                    user_profile.save()
-                    # Group assignment
-                    if group_name:
-                        group, _ = Group.objects.get_or_create(name=group_name)
-                        group.students.add(user)
-                    created += 1
-                except Exception as e:
-                    errors.append(f"Row {i}: {e}")
-            result = {"created": created, "skipped": skipped, "errors": errors}
+
+                user = User.objects.create_user(username=username, email=email, password=password)
+                profile, _ = UserProfile.objects.get_or_create(user=user)
+                profile.full_name = full_name
+
+                # Assign role
+                if role_name:
+                    role = Role.objects.filter(name__iexact=role_name).first()
+                    if role:
+                        profile.role = role
+
+                # Assign department (optional)
+                if dept_name:
+                    dept = Department.objects.filter(name__iexact=dept_name).first()
+                    if dept:
+                        profile.department = dept
+
+                profile.save()
+
+                # Group assignment (optional)
+                if group_name:
+                    group, _ = Group.objects.get_or_create(name=group_name)
+                    group.students.add(user)
+
+                created += 1
+
+            except Exception as e:
+                errors.append(f"Row {i}: {e}")
+
+        result = {"created": created, "skipped": skipped, "errors": errors}
+
+        if created > 0:
+            messages.success(request, f"✅ {created} users added successfully. {skipped} skipped.")
+        if errors:
+            messages.warning(request, f"⚠️ Some rows failed: {len(errors)} issues.")
+            for err in errors[:5]:  # show only top 5 errors
+                messages.info(request, err)
+
+        return redirect("admin_manage_users")
+
     return render(request, "codingapp/bulk_user_upload.html", {"result": result})
+
 
 
 from django.contrib.auth.decorators import user_passes_test, login_required
@@ -1278,10 +1487,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from .models import Question
 
-def is_teacher(user):
-    return user.is_staff or user.groups.filter(name="Teachers").exists()
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_bulk_upload_mcq(request):
     if request.method == 'POST' and request.FILES.get('excel_file'):
         excel_file = request.FILES['excel_file']
@@ -1353,22 +1560,16 @@ from django.shortcuts import render, redirect, get_object_or_404
 from .models import Quiz
 from .forms import QuizForm
 
-def is_teacher(user):
-    return user.is_staff or user.groups.filter(name='Teachers').exists()
-
 from .models import Quiz
 from .forms import QuizForm
 from django.contrib.auth.decorators import user_passes_test
 
-def is_teacher(user):
-    return user.is_staff or user.groups.filter(name='Teachers').exists()
-
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_quiz_list(request):
     quizzes = Quiz.objects.filter(created_by=request.user)
     return render(request, 'codingapp/teacher_quiz_list.html', {'quizzes': quizzes})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_quiz_create(request):
     if request.method == "POST":
         form = QuizForm(request.POST)
@@ -1382,7 +1583,7 @@ def teacher_quiz_create(request):
         form = QuizForm()
     return render(request, 'codingapp/teacher_quiz_form.html', {'form': form, 'action': 'Create'})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_quiz_edit(request, quiz_id):
     quiz = get_object_or_404(Quiz, id=quiz_id, created_by=request.user)
     if request.method == "POST":
@@ -1394,7 +1595,7 @@ def teacher_quiz_edit(request, quiz_id):
         form = QuizForm(instance=quiz)
     return render(request, 'codingapp/teacher_quiz_form.html', {'form': form, 'action': 'Edit'})
 
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_quiz_delete(request, quiz_id):
     quiz = get_object_or_404(Quiz, id=quiz_id, created_by=request.user)
     if request.method == "POST":
@@ -1442,61 +1643,78 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Q
 from .models import Note
 
+from codingapp.utils import is_teacher, is_hod, is_admin  # make sure this import exists
+
+
 @login_required
 def notes_list(request):
-    user_groups = request.user.custom_groups.all()
-    notes = Note.objects.filter(
-        Q(group__in=user_groups) | Q(group__isnull=True)
-    ).distinct()
-    return render(request, 'codingapp/notes_list.html', {'notes': notes})
+    """
+    Students see only notes from their groups.
+    Teachers/HOD/Admins see all notes from their department.
+    """
+    accessible_groups = get_user_accessible_groups(request.user)
 
+    # Teachers, HODs, Admins can see all notes for groups they manage
+    notes = Note.objects.filter(
+        Q(group__in=accessible_groups) | Q(group__isnull=True)
+    ).distinct()
+
+    can_manage_notes = is_teacher(request.user) or is_hod(request.user) or is_admin(request.user)
+
+    return render(request, "codingapp/notes_list.html", {
+        "notes": notes,
+        "can_manage_notes": can_manage_notes,
+    })
 
 
 @login_required
 def add_note(request):
-    if not request.user.is_staff:
+    if not (is_teacher(request.user) or is_hod(request.user) or is_admin(request.user)):
+        messages.error(request, "You do not have permission to upload study materials.")
         return redirect('notes_list')
+
     form = NoteForm(request.POST or None, request.FILES or None)
     if form.is_valid():
         note = form.save(commit=False)
         note.uploaded_by = request.user
         note.save()
+        messages.success(request, "Note uploaded successfully.")
         return redirect('notes_list')
-    return render(request, 'codingapp/add_note.html', {'form': form})
 
-from django.shortcuts import get_object_or_404
-from django.contrib import messages
+    return render(request, "codingapp/add_note.html", {'form': form})
+
 
 @login_required
 def edit_note(request, note_id):
-    note = get_object_or_404(Note, id=note_id, uploaded_by=request.user)
-    if request.method == 'POST':
-        form = NoteForm(request.POST, request.FILES, instance=note)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "Note updated successfully.")
-            return redirect('notes_list')
-    else:
-        form = NoteForm(instance=note)
-    return render(request, 'codingapp/add_note.html', {'form': form, 'edit_mode': True})
+    note = get_object_or_404(Note, id=note_id)
+
+    if not (is_teacher(request.user) or is_hod(request.user) or is_admin(request.user)) or note.uploaded_by != request.user:
+        messages.error(request, "You cannot edit this note.")
+        return redirect('notes_list')
+
+    form = NoteForm(request.POST or None, request.FILES or None, instance=note)
+    if form.is_valid():
+        form.save()
+        messages.success(request, "Note updated successfully.")
+        return redirect('notes_list')
+
+    return render(request, "codingapp/add_note.html", {'form': form, 'edit_mode': True})
 
 
 @login_required
 def delete_note(request, note_id):
-    note = get_object_or_404(Note, id=note_id, uploaded_by=request.user)
+    note = get_object_or_404(Note, id=note_id)
+
+    if not (is_teacher(request.user) or is_hod(request.user) or is_admin(request.user)) or note.uploaded_by != request.user:
+        messages.error(request, "You cannot delete this note.")
+        return redirect('notes_list')
+
     if request.method == 'POST':
         note.delete()
         messages.success(request, "Note deleted successfully.")
         return redirect('notes_list')
-    return render(request, 'codingapp/confirm_delete_note.html', {'note': note})
 
-
-from .models import Notice, NoticeReadStatus
-from .forms import NoticeForm
-from django.contrib.auth.decorators import login_required, user_passes_test
-from django.shortcuts import render, redirect, get_object_or_404
-from django.utils import timezone
-from django.db.models import Q
+    return render(request, "codingapp/confirm_delete_note.html", {'note': note})
 
 
 # List all notices for current user (group/for_everyone)
@@ -1534,7 +1752,9 @@ def notice_detail(request, pk):
 from django.db.models import Q
 
 # Staff: Add notice
-@user_passes_test(lambda u: u.is_staff)
+from codingapp.utils import is_teacher, is_hod, is_admin
+
+@login_required
 def add_notice(request):
     if request.method == "POST":
         form = NoticeForm(request.POST, request.FILES)
@@ -1556,8 +1776,9 @@ def add_notice(request):
 
 # Staff: Edit and Delete Notice (similar pattern, optional for now)
 from django.contrib import messages
+from codingapp.utils import is_teacher, is_hod, is_admin
 
-@user_passes_test(lambda u: u.is_staff)
+@login_required
 def edit_notice(request, pk):
     notice = get_object_or_404(Notice, pk=pk)
     if request.method == "POST":
@@ -1569,8 +1790,10 @@ def edit_notice(request, pk):
     else:
         form = NoticeForm(instance=notice)
     return render(request, "codingapp/edit_notice.html", {"form": form, "notice": notice})
+from codingapp.utils import is_teacher, is_hod, is_admin
+from codingapp.utils import is_teacher, is_hod, is_admin
 
-@user_passes_test(lambda u: u.is_staff)
+@login_required
 def delete_notice(request, pk):
     notice = get_object_or_404(Notice, pk=pk)
     if request.method == "POST":
@@ -1605,8 +1828,9 @@ import openpyxl
 from django.contrib.auth.decorators import user_passes_test
 from .forms import BulkMCQUploadForm
 from .models import Question
+from codingapp.utils import is_teacher, is_hod, is_admin
 
-@user_passes_test(lambda u: u.is_staff)
+@login_required
 def bulk_mcq_upload(request):
     result = None
     if request.method == "POST":
@@ -1666,9 +1890,6 @@ from .models import Course
 from .forms import CourseForm, CourseContentFormSet
 from django.contrib.auth.decorators import login_required, user_passes_test
 
-def is_teacher(user):
-    return user.is_staff  # or use a custom check
-
 from django.db.models import Q
 from codingapp.models import Course, Group  # ✅ Make sure this is your model
 from django.contrib.auth.decorators import login_required
@@ -1684,6 +1905,9 @@ def course_list(request):
 @login_required
 def course_detail(request, pk):
     course = get_object_or_404(Course, pk=pk)
+    denied = deny_access_if_not_allowed(request, course)
+    if denied:
+        return denied
     # Check access
     if not course.is_public and not course.groups.filter(id__in=request.user.group_set.values_list('id', flat=True)).exists():
         return render(request, 'codingapp/courses/denied.html')
@@ -1697,7 +1921,7 @@ def course_detail(request, pk):
 
 
 @login_required
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def create_course(request):
     if request.method == 'POST':
         form = CourseForm(request.POST)
@@ -1728,14 +1952,14 @@ def create_course(request):
 from django.contrib import messages
 
 @login_required
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def manage_courses(request):
     courses = Course.objects.filter(created_by=request.user)
     return render(request, 'codingapp/courses/manage.html', {'courses': courses})
 
 
 @login_required
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def edit_course(request, pk):
     course = get_object_or_404(Course, pk=pk, created_by=request.user)
 
@@ -1774,7 +1998,7 @@ def edit_course(request, pk):
 
 
 @login_required
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def delete_course(request, pk):
     course = get_object_or_404(Course, pk=pk, created_by=request.user)
     if request.method == 'POST':
@@ -1844,77 +2068,118 @@ def run_code_view(request):
 
 
 
+from django.db.models import Avg, Q
 from django.contrib.auth.decorators import login_required, user_passes_test
-from django.db.models import Avg
 from django.shortcuts import render
 from django.contrib.auth.models import User
-from codingapp.models import Submission, QuizSubmission, Group, Module, ModuleCompletion
+from codingapp.models import Submission, QuizSubmission, Module, ModuleCompletion, Group, UserProfile
+from codingapp.utils import get_user_accessible_groups
+from codingapp.utils import is_teacher, is_hod, is_admin
+from codingapp.utils import get_user_accessible_groups
+
 
 @login_required
-@user_passes_test(lambda u: u.is_staff)
 def student_performance_list(request):
-    selected_group_id = request.GET.get('group')
-    search_query = request.GET.get('q', '')
-    sort_key = request.GET.get('sort', 'username')
+    """
+    Shows performance data for students accessible to the current user:
+    - Admin → all students
+    - HOD → students in their department
+    - Teacher → students in their assigned groups
+    """
+    accessible_groups = get_user_accessible_groups(request.user)
+    profile = getattr(request.user, "userprofile", None)
+    role_name = profile.role.name.lower() if profile and profile.role else "unknown"
 
-    students = User.objects.filter(is_staff=False)
+    selected_group_id = request.GET.get("group")
+    search_query = request.GET.get("q", "")
+    sort_key = request.GET.get("sort", "username")
+
+    # 🔹 Get student queryset
+    if role_name == "admin":
+        students = User.objects.filter(is_staff=False)
+    else:
+        students = User.objects.filter(
+            is_staff=False,
+            id__in=Group.objects.filter(id__in=accessible_groups).values_list("students__id", flat=True)
+        )
+
     if selected_group_id:
         students = students.filter(groups__id=selected_group_id)
     if search_query:
-        students = students.filter(username__icontains=search_query)
+        students = students.filter(
+            Q(username__icontains=search_query)
+            | Q(userprofile__full_name__icontains=search_query)
+        )
+
+    students = students.distinct()
 
     total_modules = Module.objects.count()
     performance_data = []
 
     for student in students:
-        coding_submissions = Submission.objects.filter(user=student)
-        quiz_submissions = QuizSubmission.objects.filter(user=student)
+        # Groups that teacher/HOD can access for this student
+        student_groups = Group.objects.filter(students=student, id__in=accessible_groups)
 
-        total_coding = coding_submissions.count()
-        accepted_coding = coding_submissions.filter(status='Accepted').count()
+        # ✅ Coding Submissions (modules linked to accessible groups)
+        student_submissions = Submission.objects.filter(
+            user=student,
+            question__module__groups__in=student_groups
+        ).distinct()
+
+        # ✅ Quiz Submissions (via Assessments linked to accessible groups)
+        accessible_assessments = Assessment.objects.filter(groups__in=student_groups).distinct()
+        quiz_submissions = QuizSubmission.objects.filter(
+            user=student,
+            quiz__in=accessible_assessments.values_list("quiz_id", flat=True)
+        ).distinct()
+
+        # ✅ Completed Modules (within accessible groups)
+        completed_modules = ModuleCompletion.objects.filter(
+            user=student,
+            module__groups__in=student_groups,
+            completed=True
+        ).distinct()
+
+        total_coding = student_submissions.count()
+        accepted_coding = student_submissions.filter(status="Accepted").count()
         total_quizzes = quiz_submissions.count()
-        avg_quiz_score = quiz_submissions.aggregate(avg=Avg('score'))['avg'] or 0
-
-        # ✅ Correct usage for completed modules
-        completed_modules = ModuleCompletion.objects.filter(user=student, completed=True).count()
+        avg_quiz_score = quiz_submissions.aggregate(avg=Avg("score"))["avg"] or 0
 
         performance_data.append({
-            'student': student,
-            'total_coding': total_coding,
-            'accepted_coding': accepted_coding,
-            'total_quizzes': total_quizzes,
-            'avg_quiz_score': round(avg_quiz_score, 2),
-            'completed_modules': completed_modules,
-            'total_modules': total_modules,
+            "student": student,
+            "total_coding": total_coding,
+            "accepted_coding": accepted_coding,
+            "total_quizzes": total_quizzes,
+            "avg_quiz_score": round(avg_quiz_score, 2),
+            "completed_modules": completed_modules.count(),
+            "total_modules": total_modules,
         })
 
-    # ✅ Sorting
-    if sort_key == 'submissions':
-        performance_data.sort(key=lambda x: x['total_coding'], reverse=True)
-    elif sort_key == 'accepted':
-        performance_data.sort(key=lambda x: x['accepted_coding'], reverse=True)
-    elif sort_key == 'quizzes':
-        performance_data.sort(key=lambda x: x['total_quizzes'], reverse=True)
-    elif sort_key == 'score':
-        performance_data.sort(key=lambda x: x['avg_quiz_score'], reverse=True)
-    elif sort_key == 'top_performer':
-        performance_data.sort(
-            key=lambda x: (x['accepted_coding'] + x['avg_quiz_score'] + x['completed_modules']),
-            reverse=True
-        )
+    # ✅ Sorting logic
+    sort_map = {
+        "submissions": lambda x: x["total_coding"],
+        "accepted": lambda x: x["accepted_coding"],
+        "quizzes": lambda x: x["total_quizzes"],
+        "score": lambda x: x["avg_quiz_score"],
+        "top_performer": lambda x: (
+            x["accepted_coding"] + x["avg_quiz_score"] + x["completed_modules"]
+        ),
+    }
+    if sort_key in sort_map:
+        performance_data.sort(key=sort_map[sort_key], reverse=True)
     else:
-        performance_data.sort(key=lambda x: x['student'].username.lower())
+        performance_data.sort(key=lambda x: x["student"].username.lower())
 
-    groups = Group.objects.all()
+    groups = accessible_groups
 
-    return render(request, 'codingapp/student_performance_list.html', {
-        'performance_data': performance_data,
-        'groups': groups,
-        'selected_group_id': selected_group_id,
-        'search_query': search_query,
-        'sort_key': sort_key,
+    return render(request, "codingapp/student_performance_list.html", {
+        "performance_data": performance_data,
+        "groups": groups,
+        "selected_group_id": selected_group_id,
+        "search_query": search_query,
+        "sort_key": sort_key,
+        "role_name": role_name,
     })
-
 
 from django.http import HttpResponse
 from django.contrib.auth.models import User
@@ -1922,27 +2187,82 @@ from django.db.models import Count
 from .models import Submission, QuizSubmission, Module
 from django.contrib.auth.decorators import login_required, user_passes_test
 
-def is_teacher(user):
-    return user.is_staff or user.groups.filter(name='Teachers').exists()
+
+from django.contrib.auth.decorators import login_required, user_passes_test
+from django.shortcuts import render, get_object_or_404
+from django.http import HttpResponse
+from django.db.models import Q
+from codingapp.models import (
+    Submission, QuizSubmission, Module, ModuleCompletion,
+    Group, UserProfile, Assessment
+)
+from codingapp.utils import get_user_accessible_groups
+
+from codingapp.utils import is_teacher, is_hod, is_admin
+from codingapp.utils import get_user_accessible_groups
+
 
 @login_required
-@user_passes_test(is_teacher)
 def student_performance_detail(request, student_id):
-    try:
-        student = User.objects.get(pk=student_id, is_staff=False)
-    except User.DoesNotExist:
-        return HttpResponse("Student not found.", status=404)
+    """
+    Shows a detailed performance dashboard for a single student:
+    - Admin → all students
+    - HOD → students in their department
+    - Teacher → students in their assigned groups
+    """
 
-    coding_submissions = Submission.objects.filter(user=student).order_by('-submitted_at')
-    quiz_submissions = QuizSubmission.objects.filter(user=student).order_by('-submitted_at')
+    profile = getattr(request.user, "userprofile", None)
+    role_name = profile.role.name.lower() if profile and profile.role else "unknown"
+    accessible_groups = get_user_accessible_groups(request.user)
 
-    # Module-wise progress calculation
+    # 🔹 Get the target student profile
+    student_profile = get_object_or_404(UserProfile, id=student_id)
+    student_user = student_profile.user
+
+    # --- Permission Check ---
+    if role_name == "hod":
+        if student_profile.department_id != profile.department_id:
+            return HttpResponse("Access denied: Student not in your department.", status=403)
+    elif role_name == "teacher":
+        teacher_groups = Group.objects.filter(teachers=request.user)
+        if not Group.objects.filter(id__in=teacher_groups, students=student_user).exists():
+            return HttpResponse("Access denied: Student not in your assigned groups.", status=403)
+
+    # 🔹 Determine which groups the student belongs to (that the teacher/admin can access)
+    student_groups = Group.objects.filter(students=student_user, id__in=accessible_groups)
+
+    # ✅ Coding submissions (modules in these groups)
+    coding_submissions = (
+        Submission.objects.filter(
+            user=student_user,
+            question__module__groups__in=student_groups
+        )
+        .select_related("question")
+        .distinct()
+        .order_by("-submitted_at")
+    )
+
+    # ✅ Quiz submissions (via assessments linked to those groups)
+    accessible_assessments = Assessment.objects.filter(groups__in=student_groups).distinct()
+    quiz_submissions = (
+        QuizSubmission.objects.filter(
+            user=student_user,
+            quiz__in=accessible_assessments.values_list("quiz_id", flat=True)
+        )
+        .select_related("quiz")
+        .distinct()
+        .order_by("-submitted_at")
+    )
+
+    # ✅ Module completion overview
     module_progress = []
-    for module in Module.objects.all():
+    modules = Module.objects.filter(groups__in=student_groups).distinct()
+
+    for module in modules:
         questions = module.questions.all()
         total = questions.count()
         completed = Submission.objects.filter(
-            user=student,
+            user=student_user,
             question__in=questions,
             status="Accepted"
         ).values("question").distinct().count()
@@ -1951,17 +2271,18 @@ def student_performance_detail(request, student_id):
             module_progress.append({
                 "module_title": module.title,
                 "completed": completed,
-                "total": total,
-                'remaining': total - completed
+                "remaining": total - completed
             })
 
-    return render(request, 'codingapp/student_performance_detail.html', {
-        'student': student,
-        'coding_submissions': coding_submissions,
-        'quiz_submissions': quiz_submissions,
-        'module_progress': module_progress,
-        
-    })
+    context = {
+        "student": student_user,
+        "coding_submissions": coding_submissions,
+        "quiz_submissions": quiz_submissions,
+        "module_progress": module_progress,
+    }
+
+    return render(request, "codingapp/student_performance_detail.html", context)
+
 
 
 
@@ -1970,7 +2291,7 @@ from django.http import HttpResponse
 from django.db.models import Avg
 
 @login_required
-@user_passes_test(is_teacher)
+@user_passes_test(is_teacher, login_url='/dashboard/')
 def export_student_performance(request):
     selected_group_id = request.GET.get('group')
     search_query = request.GET.get('q', '')
@@ -2180,3 +2501,797 @@ def check_submission_status(request, task_id):
             response_data['error'] = str(e)
             
     return JsonResponse(response_data)
+
+
+# ==============================================================
+# 🧩 Permissions Management View (Admin Dashboard)
+# ==============================================================
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from codingapp.models import ActionPermission, Role, UserProfile
+from codingapp.permissions import can_assign
+
+@login_required
+def permissions_manage(request):
+    """
+    Admin dashboard page to view and assign permissions.
+    - Left: list of users
+    - Right: selected user's permissions (inherited role perms vs custom perms)
+    Supports bulk assignment of multiple custom permissions to a single user.
+    """
+    from codingapp.models import Role, ActionPermission, UserProfile
+    import json
+
+    profile = getattr(request.user, "userprofile", None)
+    if not profile or not profile.role or profile.role.name.lower() != "admin":
+        messages.error(request, "You don't have access to this page.")
+        return redirect("dashboard")
+
+    # Load everything needed
+    permissions = ActionPermission.objects.all().order_by("code")
+    roles = Role.objects.prefetch_related("permissions").order_by("name")
+    users = (
+        UserProfile.objects.select_related("role", "user")
+        .prefetch_related("custom_permissions", "role__permissions")
+        .order_by("role__name", "user__username")   # ✅ Added sorting by role name first
+    )
+    search_query = request.GET.get("search", "").strip()
+    if search_query:
+        users = users.filter(
+            Q(user__username__icontains=search_query)
+            | Q(full_name__icontains=search_query)
+            | Q(user__email__icontains=search_query)
+            | Q(role__name__icontains=search_query)
+        )
+
+    # Build fast lookup maps for template
+    role_permission_map = {}
+    custom_permission_map = {}
+    combined_permission_map = {}
+
+    for u in users:
+        role_perms = list(u.role.permissions.values_list("id", flat=True)) if u.role else []
+        custom_perms = list(u.custom_permissions.values_list("id", flat=True))
+        role_permission_map[u.id] = role_perms
+        custom_permission_map[u.id] = custom_perms
+        combined_permission_map[u.id] = sorted(set(role_perms) | set(custom_perms))
+    
+    # Handle POST actions
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        # ✅ Bulk update: replace a user’s custom permissions
+        if action == "update_user_perms":
+            user_id = request.POST.get("user_id")
+            perm_ids = request.POST.getlist("perm_ids")
+            try:
+                user_profile = UserProfile.objects.get(id=user_id)
+            except UserProfile.DoesNotExist:
+                messages.error(request, "User not found.")
+                return redirect("permissions_manage")
+
+            try:
+                perm_ids_int = [int(i) for i in perm_ids]
+            except ValueError:
+                perm_ids_int = []
+
+            perms = ActionPermission.objects.filter(id__in=perm_ids_int)
+            user_profile.custom_permissions.set(perms)
+            user_profile.save()
+            messages.success(request, f"Updated custom permissions for {user_profile.user.username}.")
+            return redirect("permissions_manage")
+
+        # ✅ Compatibility: single add/remove actions
+        role_id = request.POST.get("role_id")
+        perm_id = request.POST.get("perm_id")
+        user_id = request.POST.get("user_id")
+        single_action = request.POST.get("single_action")
+
+        if role_id and perm_id and single_action:
+            try:
+                role = Role.objects.get(id=role_id)
+                perm = ActionPermission.objects.get(id=perm_id)
+                if single_action == "add":
+                    role.permissions.add(perm)
+                else:
+                    role.permissions.remove(perm)
+                messages.success(request, f"Permission '{perm.name}' updated for role '{role.name}'.")
+            except Exception as e:
+                messages.error(request, f"Error: {e}")
+            return redirect("permissions_manage")
+
+        if user_id and perm_id and single_action:
+            try:
+                up = UserProfile.objects.get(id=user_id)
+                perm = ActionPermission.objects.get(id=perm_id)
+                if single_action == "add":
+                    up.custom_permissions.add(perm)
+                else:
+                    up.custom_permissions.remove(perm)
+                messages.success(request, f"Permission '{perm.name}' updated for user '{up.user.username}'.")
+            except Exception as e:
+                messages.error(request, f"Error: {e}")
+            return redirect("permissions_manage")
+
+    # ✅ Serialize maps for template
+    context = {
+        "permissions": permissions,
+        "roles": roles,
+        "users": users,
+        "role_permission_map": role_permission_map,
+        "custom_permission_map": custom_permission_map,
+        "user_permission_map": combined_permission_map,
+        "role_perm_json": json.dumps(role_permission_map),
+        "custom_perm_json": json.dumps(custom_permission_map),
+    }
+    return render(request, "dashboard/permissions_manage.html", context)
+
+# ==============================================================
+# 🧩 HOD Permission Management View
+# ==============================================================
+from django.db.models import Q
+from django.contrib import messages
+from django.shortcuts import render, redirect
+from django.contrib.auth.decorators import login_required
+from codingapp.models import UserProfile, ActionPermission, Role
+import json
+
+@login_required
+def permissions_hod(request):
+    """
+    HOD permission management page — similar to admin, but scoped to HOD's department.
+    Includes search functionality for easier filtering.
+    """
+    profile = getattr(request.user, "userprofile", None)
+    if not profile or not profile.role or profile.role.name.lower() != "hod":
+        messages.error(request, "You don't have access to this page.")
+        return redirect("dashboard")
+
+    # Limit scope to users in HOD’s department (excluding self)
+    users = (
+        UserProfile.objects.filter(
+            Q(department=profile.department),
+            ~Q(id=profile.id),  # exclude HOD themselves
+        )
+        .select_related("role", "user", "department")
+        .prefetch_related("custom_permissions", "role__permissions")
+        .order_by("role__name", "user__username")
+    )
+
+    # ✅ Search feature
+    search_query = request.GET.get("search", "").strip()
+    if search_query:
+        users = users.filter(
+            Q(user__username__icontains=search_query)
+            | Q(full_name__icontains=search_query)
+            | Q(user__email__icontains=search_query)
+            | Q(role__name__icontains=search_query)
+        )
+
+    # Permissions the HOD can manage = those the HOD already has
+    allowed_codes = profile.permission_codes()
+    permissions = ActionPermission.objects.filter(code__in=allowed_codes).order_by("code")
+
+    # Build maps for frontend JS
+    role_permission_map, custom_permission_map, combined_permission_map = {}, {}, {}
+    for u in users:
+        role_perms = list(u.role.permissions.values_list("id", flat=True)) if u.role else []
+        custom_perms = list(u.custom_permissions.values_list("id", flat=True))
+        role_permission_map[u.id] = role_perms
+        custom_permission_map[u.id] = custom_perms
+        combined_permission_map[u.id] = sorted(set(role_perms) | set(custom_perms))
+
+    # ✅ Handle permission updates (HOD can edit users in their dept)
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "update_user_perms":
+            user_id = request.POST.get("user_id")
+            perm_ids = request.POST.getlist("perm_ids")
+
+            try:
+                target_user = UserProfile.objects.get(id=user_id, department=profile.department)
+            except UserProfile.DoesNotExist:
+                messages.error(request, "User not found or not in your department.")
+                return redirect("permissions_hod")
+
+            # Only assign permissions that the HOD also possesses
+            perms = ActionPermission.objects.filter(id__in=perm_ids, code__in=allowed_codes)
+            target_user.custom_permissions.set(perms)
+            target_user.save()
+
+            messages.success(
+                request,
+                f"Updated custom permissions for {target_user.user.username}.",
+            )
+            return redirect("permissions_hod")
+
+    context = {
+        "permissions": permissions,
+        "users": users,
+        "search_query": search_query,
+        "role_perm_json": json.dumps(role_permission_map),
+        "custom_perm_json": json.dumps(custom_permission_map),
+    }
+    return render(request, "dashboard/permissions_hod.html", context)
+
+# ==============================================================
+# 🧩 ADMIN CONTROL CENTER
+# ==============================================================
+from django.db.models import Count
+
+from django.db.models import Count, Q, Prefetch
+from django.contrib import messages
+from django.shortcuts import render, redirect
+from codingapp.models import Department, Role, ActionPermission, UserProfile
+
+
+@login_required
+def admin_control_center(request):
+    """Admin's master control center with safe null handling."""
+    profile = getattr(request.user, "userprofile", None)
+    if not profile or not profile.role or profile.role.name.lower() != "admin":
+        messages.error(request, "You don’t have access to this page.")
+        return redirect("dashboard")
+
+    # Prefetch safely (avoids N+1)
+    roles = Role.objects.prefetch_related("permissions").order_by("name")
+    permissions = ActionPermission.objects.all().order_by("code")
+
+    # Annotate departments with member count and prefetch related HOD safely
+    departments = (
+        Department.objects.select_related("hod__user")
+        .annotate(user_count=Count("userprofile"))
+        .order_by("name")
+    )
+
+    users = (
+        UserProfile.objects.select_related("role", "department", "user")
+        .order_by("user__username")
+    )
+
+    # Count users by role
+    role_counts = (
+        UserProfile.objects.values("role__name")
+        .annotate(count=Count("id"))
+        .order_by("role__name")
+    )
+
+    context = {
+        "roles": roles,
+        "permissions": permissions,
+        "departments": departments,
+        "users": users,
+        "role_counts": role_counts,
+    }
+    return render(request, "dashboard/admin_control_center.html", context)
+
+# ==============================================================
+# 🧩 ADMIN: MANAGE USERS
+# ==============================================================
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.shortcuts import render, redirect
+from django.contrib.auth.models import User
+from codingapp.models import Role, Department, UserProfile
+
+
+@login_required
+def admin_manage_users(request):
+    """Admin view to manage users, grouped by department and role."""
+
+    profile = getattr(request.user, "userprofile", None)
+    if not profile or not profile.role or profile.role.name.lower() != "admin":
+        messages.error(request, "Access denied.")
+        return redirect("dashboard")
+
+    # Load roles and departments
+    from django.db.models.functions import Lower
+    roles = (
+    Role.objects.annotate(name_lower=Lower("name"))
+    .order_by("name_lower")
+    .distinct("name_lower")
+)
+    departments = Department.objects.all().order_by("name")
+
+    # Prefetch all users with relations
+    users = (
+        UserProfile.objects.select_related("user", "role", "department")
+        .prefetch_related("custom_permissions")
+        .order_by("department__name", "role__name", "user__username")
+    )
+
+    search_query = request.GET.get("search", "").strip()
+
+    users = (
+        UserProfile.objects.select_related("user", "role", "department")
+        .prefetch_related("custom_permissions")
+        .order_by("department__name", "role__name", "user__username")
+    )
+
+    # ✅ Apply search filter
+    if search_query:
+        users = users.filter(
+            Q(user__username__icontains=search_query)
+            | Q(full_name__icontains=search_query)
+            | Q(user__email__icontains=search_query)
+            | Q(role__name__icontains=search_query)
+        )
+
+
+    # Group by department and role
+    structured_data = []
+    for dept in departments:
+        dept_users = [u for u in users if u.department == dept]
+        if not dept_users:
+            continue
+
+        dept_data = {"department": dept, "roles": []}
+        for role_name in ["HOD", "Teacher", "Student"]:
+            role_users = [
+                u for u in dept_users
+                if (u.role and u.role.name.lower() == role_name.lower())
+            ]
+            if role_users:
+                dept_data["roles"].append({
+                    "role_name": role_name,
+                    "users": role_users
+                })
+
+        # Add unassigned users within department
+        unassigned = [u for u in dept_users if not u.role]
+        if unassigned:
+            dept_data["roles"].append({
+                "role_name": "Unassigned",
+                "users": unassigned
+            })
+
+        structured_data.append(dept_data)
+
+    # Users without department
+    no_dept_users = [u for u in users if not u.department]
+    if no_dept_users:
+        structured_data.append({
+            "department": None,
+            "roles": [{"role_name": "Unassigned", "users": no_dept_users}]
+        })
+
+    # Handle form actions
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        # ADD USER
+        if action == "add_user":
+            username = request.POST.get("username")
+            email = request.POST.get("email")
+            password = request.POST.get("password")
+            role_id = request.POST.get("role_id")
+            dept_id = request.POST.get("dept_id")
+
+            if not username or not password:
+                messages.error(request, "Username and password are required.")
+                return redirect("admin_manage_users")
+
+            if User.objects.filter(username=username).exists():
+                messages.warning(request, f"User '{username}' already exists.")
+                return redirect("admin_manage_users")
+
+            user = User.objects.create_user(username=username, email=email, password=password)
+            profile = UserProfile.objects.get(user=user)
+            if role_id:
+                profile.role = Role.objects.get(id=role_id)
+            if dept_id:
+                profile.department = Department.objects.get(id=dept_id)
+            profile.save()
+
+            messages.success(request, f"User '{username}' added successfully.")
+            return redirect("admin_manage_users")
+
+        # INDIVIDUAL UPDATE
+        elif action == "update_user":
+            user_id = request.POST.get("user_id")
+            role_id = request.POST.get("role_id")
+            dept_id = request.POST.get("dept_id")
+            try:
+                profile = UserProfile.objects.get(id=user_id)
+                if role_id:
+                    profile.role = Role.objects.get(id=role_id)
+                if dept_id:
+                    profile.department = Department.objects.get(id=dept_id)
+                profile.save()
+                messages.success(request, f"Updated user '{profile.user.username}'.")
+            except Exception as e:
+                messages.error(request, f"Error updating user: {e}")
+            return redirect("admin_manage_users")
+
+        # BULK UPDATE
+        elif action == "bulk_update":
+            selected_ids = request.POST.getlist("selected_users")
+            role_id = request.POST.get("bulk_role")
+            dept_id = request.POST.get("bulk_dept")
+            if not selected_ids:
+                messages.warning(request, "No users selected.")
+                return redirect("admin_manage_users")
+
+            count = 0
+            for uid in selected_ids:
+                try:
+                    up = UserProfile.objects.get(id=uid)
+                    if role_id:
+                        up.role = Role.objects.get(id=role_id)
+                    if dept_id:
+                        up.department = Department.objects.get(id=dept_id)
+                    up.save()
+                    count += 1
+                except Exception as e:
+                    messages.error(request, f"Error updating user {uid}: {e}")
+            messages.success(request, f"Bulk updated {count} users successfully.")
+            return redirect("admin_manage_users")
+
+        # TOGGLE ACTIVE
+        elif action == "toggle_active":
+            user_id = request.POST.get("user_id")
+            try:
+                profile = UserProfile.objects.get(id=user_id)
+                profile.user.is_active = not profile.user.is_active
+                profile.user.save()
+                state = "activated" if profile.user.is_active else "deactivated"
+                messages.success(request, f"User '{profile.user.username}' has been {state}.")
+            except Exception as e:
+                messages.error(request, f"Error toggling user: {e}")
+            return redirect("admin_manage_users")
+
+        # DELETE USER
+        elif action == "delete_user":
+            user_id = request.POST.get("user_id")
+            try:
+                profile = UserProfile.objects.get(id=user_id)
+                username = profile.user.username
+                profile.user.delete()
+                messages.success(request, f"User '{username}' deleted successfully.")
+            except Exception as e:
+                messages.error(request, f"Error deleting user: {e}")
+            return redirect("admin_manage_users")
+
+        # RESET PASSWORD
+        elif action == "reset_password":
+            user_id = request.POST.get("user_id")
+            new_password = request.POST.get("new_password")
+            try:
+                profile = UserProfile.objects.get(id=user_id)
+                profile.user.set_password(new_password)
+                profile.user.save()
+                messages.success(request, f"Password reset for '{profile.user.username}'.")
+            except Exception as e:
+                messages.error(request, f"Error resetting password: {e}")
+            return redirect("admin_manage_users")
+
+        # BULK ACTIVATE/DEACTIVATE/DELETE
+        elif action in ["bulk_activate", "bulk_deactivate", "bulk_delete"]:
+            selected_ids = request.POST.getlist("selected_users")
+            if not selected_ids:
+                messages.warning(request, "No users selected.")
+                return redirect("admin_manage_users")
+
+            count = 0
+            for uid in selected_ids:
+                try:
+                    up = UserProfile.objects.get(id=uid)
+                    if action == "bulk_delete":
+                        up.user.delete()
+                    elif action == "bulk_activate":
+                        up.user.is_active = True
+                        up.user.save()
+                    elif action == "bulk_deactivate":
+                        up.user.is_active = False
+                        up.user.save()
+                    count += 1
+                except Exception as e:
+                    messages.error(request, f"Error processing user {uid}: {e}")
+
+            verb = (
+                "deleted" if action == "bulk_delete"
+                else "activated" if action == "bulk_activate"
+                else "deactivated"
+            )
+            messages.success(request, f"{count} users {verb} successfully.")
+            return redirect("admin_manage_users")
+
+    context = {
+        "roles": roles,
+        "departments": departments,
+        "structured_data": structured_data,
+    }
+    return render(request, "dashboard/admin_manage_users.html", context)
+
+@login_required
+def admin_manage_departments(request):
+    """Admin view to manage departments: create, edit, delete, assign HODs, with user stats."""
+    from django.db.models import Count, Q
+    from codingapp.models import Department, UserProfile
+
+    # 🔒 Access control
+    profile = getattr(request.user, "userprofile", None)
+    if not profile or not profile.role or profile.role.name.lower() != "admin":
+        messages.error(request, "Access denied.")
+        return redirect("dashboard")
+
+    # Annotate departments with teacher & student counts
+    departments = (
+        Department.objects.select_related("hod")
+        .annotate(
+            teacher_count=Count(
+                "userprofile",
+                filter=Q(userprofile__role__name__iexact="teacher"),
+            ),
+            student_count=Count(
+                "userprofile",
+                filter=Q(userprofile__role__name__iexact="student"),
+            ),
+        )
+        .order_by("name")
+    )
+
+    hod_candidates = (
+        UserProfile.objects.filter(role__name__iexact="hod")
+        .select_related("user")
+        .order_by("user__username")
+    )
+
+    # ✅ Handle actions
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        # ---------- Add Department ----------
+        if action == "add_department":
+            name = request.POST.get("name")
+            code = request.POST.get("code")
+            hod_id = request.POST.get("hod_id")
+
+            if not name or not code:
+                messages.error(request, "Name and code are required.")
+                return redirect("admin_manage_departments")
+
+            dept, created = Department.objects.get_or_create(name=name, code=code)
+            if hod_id:
+                try:
+                    hod_profile = UserProfile.objects.get(id=hod_id)
+                    dept.hod = hod_profile
+                except UserProfile.DoesNotExist:
+                    messages.warning(request, "Invalid HOD selected.")
+            dept.save()
+            messages.success(
+                request,
+                f"Department '{name}' {'added' if created else 'updated'} successfully.",
+            )
+            return redirect("admin_manage_departments")
+
+        # ---------- Update Department ----------
+        elif action == "update_department":
+            dept_id = request.POST.get("dept_id")
+            name = request.POST.get("name")
+            code = request.POST.get("code")
+            hod_id = request.POST.get("hod_id")
+
+            try:
+                dept = Department.objects.get(id=dept_id)
+                dept.name = name
+                dept.code = code
+                dept.hod = UserProfile.objects.get(id=hod_id) if hod_id else None
+                dept.save()
+                messages.success(request, f"Updated department '{dept.name}'.")
+            except Exception as e:
+                messages.error(request, f"Error updating department: {e}")
+            return redirect("admin_manage_departments")
+
+        # ---------- Delete Department ----------
+        elif action == "delete_department":
+            dept_id = request.POST.get("dept_id")
+            try:
+                dept = Department.objects.get(id=dept_id)
+                name = dept.name
+                dept.delete()
+                messages.success(request, f"Department '{name}' deleted.")
+            except Exception as e:
+                messages.error(request, f"Error deleting department: {e}")
+            return redirect("admin_manage_departments")
+
+    # ---------- Context ----------
+    context = {
+        "departments": departments,
+        "hod_candidates": hod_candidates,
+    }
+    return render(request, "dashboard/admin_manage_departments.html", context)
+
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.shortcuts import render, redirect
+from codingapp.models import Group, Department, UserProfile
+
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.shortcuts import render, redirect
+from codingapp.models import Group, Department, UserProfile
+
+@login_required
+def manage_groups(request):
+    """
+    Manage Groups (Admin/HOD full access, Teachers limited to their assigned groups)
+    - Admin & HOD: can create/edit/delete groups, assign teachers & students
+    - Teachers: can only view and edit groups assigned to them
+    """
+
+    profile = getattr(request.user, "userprofile", None)
+    if not profile or not profile.role:
+        messages.error(request, "Access denied. Missing role information.")
+        return redirect("dashboard")
+
+    role_name = profile.role.name.lower()
+
+    # Admin and HOD: full control
+    groups = get_user_accessible_groups(request.user).select_related("department").prefetch_related("students", "teachers")
+
+    if role_name in ["admin", "hod"]:
+        departments = Department.objects.all().order_by("name")
+        teachers = UserProfile.objects.filter(role__name__iexact="teacher").select_related("user")
+        students = UserProfile.objects.filter(role__name__iexact="student").select_related("user")
+
+        if role_name == "hod":
+            groups = groups.filter(department=profile.department)
+            departments = Department.objects.filter(id=profile.department_id)
+            teachers = teachers.filter(department=profile.department)
+            students = students.filter(department=profile.department)
+
+    elif role_name == "teacher":
+        departments = Department.objects.filter(id=profile.department_id)
+        teachers = UserProfile.objects.filter(user=request.user)
+        students = UserProfile.objects.filter(department=profile.department)
+
+    else:
+        messages.error(request, "Access denied.")
+        return redirect("dashboard")
+
+    # =======================
+    # 🔧 Handle POST Actions
+    # =======================
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        # ✅ Create or Edit Group (Admin/HOD only)
+        if action == "add_or_edit_group" and role_name in ["admin", "hod"]:
+            group_id = request.POST.get("group_id")
+            name = request.POST.get("name", "").strip()
+            dept_id = request.POST.get("department_id")
+            teacher_ids = request.POST.getlist("teacher_ids")
+            student_ids = request.POST.getlist("student_ids")
+
+            if not name:
+                messages.error(request, "Group name cannot be empty.")
+                return redirect("manage_groups")
+
+            department = None
+            if dept_id:
+                department = get_object_or_404(Department, id=dept_id)
+
+            if group_id:
+                # Edit
+                group = get_object_or_404(Group, id=group_id)
+                if role_name == "hod" and group.department != profile.department:
+                    messages.error(request, "You can only manage groups in your department.")
+                    return redirect("manage_groups")
+
+                group.name = name
+                group.department = department
+                group.save()
+                group.teachers.set([UserProfile.objects.get(id=t).user for t in teacher_ids])
+                group.students.set([UserProfile.objects.get(id=s).user for s in student_ids])
+                messages.success(request, f"Group '{group.name}' updated successfully.")
+            else:
+                # Create
+                group = Group.objects.create(
+                    name=name,
+                    department=department,
+                    created_by=request.user
+                )
+                group.teachers.set([UserProfile.objects.get(id=t).user for t in teacher_ids])
+                group.students.set([UserProfile.objects.get(id=s).user for s in student_ids])
+                messages.success(request, f"Group '{group.name}' created successfully.")
+
+            return redirect("manage_groups")
+
+        # ✅ Delete Group (Admin/HOD only)
+        elif action == "delete_group" and role_name in ["admin", "hod"]:
+            group_id = request.POST.get("group_id")
+            group = get_object_or_404(Group, id=group_id)
+            if role_name == "hod" and group.department != profile.department:
+                messages.error(request, "You cannot delete groups outside your department.")
+            else:
+                name = group.name
+                group.delete()
+                messages.success(request, f"Group '{name}' deleted successfully.")
+            return redirect("manage_groups")
+    
+    if request.method == "POST" and request.POST.get("action") == "teacher_bulk_upload_students":
+        profile = getattr(request.user, "userprofile", None)
+        group_id = request.POST.get("group_id")
+        excel_file = request.FILES.get("excel_file")
+
+        if not profile or not profile.role or profile.role.name.lower() != "teacher":
+            messages.error(request, "Access denied. Only teachers can upload students.")
+            return redirect("manage_groups")
+
+        if not group_id or not excel_file:
+            messages.error(request, "Missing group or file.")
+            return redirect("manage_groups")
+
+        # Ensure teacher has access to this group
+        group = get_object_or_404(Group, id=group_id)
+        if not group.teachers.filter(id=request.user.id).exists():
+            messages.error(request, "You can only upload students for your assigned groups.")
+            return redirect("manage_groups")
+
+        # ✅ Parse Excel file
+        try:
+            wb = openpyxl.load_workbook(excel_file)
+            ws = wb.active
+            headers = [str(cell.value).strip().lower() if cell.value else "" for cell in ws[1]]
+
+            required = ["username", "email", "full_name", "password"]
+            if not all(h in headers for h in required):
+                messages.error(request, f"Missing required headers. Expected: {', '.join(required)}")
+                return redirect("manage_groups")
+
+            created = skipped = 0
+            dept = profile.department  # auto-assign teacher's department
+
+            for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                data = dict(zip(headers, row))
+                username = (data.get("username") or "").strip()
+                email = (data.get("email") or "").strip()
+                password = (data.get("password") or "password123").strip()
+                full_name = (data.get("full_name") or "").strip()
+
+                if not username or not email:
+                    continue
+
+                if User.objects.filter(username=username).exists():
+                    skipped += 1
+                    continue
+
+                user = User.objects.create_user(username=username, email=email, password=password)
+                profile_obj, _ = UserProfile.objects.get_or_create(user=user)
+                profile_obj.full_name = full_name
+                profile_obj.department = dept
+                profile_obj.role = Role.objects.filter(name__iexact="student").first()
+                profile_obj.save()
+
+                # ✅ Add to this group
+                group.students.add(user)
+                created += 1
+
+            messages.success(request, f"✅ Uploaded {created} students. {skipped} skipped (existing usernames).")
+
+        except Exception as e:
+            messages.error(request, f"Error processing file: {e}")
+
+        return redirect("manage_groups")
+
+    # Prepare context
+    context = {
+        "groups": groups,
+        "departments": departments,
+        "teachers": teachers,
+        "students": students,
+        "role_name": role_name,
+    }
+
+    # ✅ Group the groups by department
+    from collections import defaultdict
+    grouped_by_department = defaultdict(list)
+    for g in groups:
+        dept_name = g.department.name if g.department else "Unassigned Department"
+        grouped_by_department[dept_name].append(g)
+
+    context["grouped_by_department"] = dict(grouped_by_department)
+
+    return render(request, "dashboard/manage_groups.html", context)

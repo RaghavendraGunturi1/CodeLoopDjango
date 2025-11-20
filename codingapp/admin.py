@@ -143,11 +143,21 @@ class AssessmentQuestionAdmin(admin.ModelAdmin):
 from django.contrib import admin
 from .models import Group
 
-class GroupAdmin(admin.ModelAdmin):
-    list_display = ('name',)  # Add more fields if you want
-    filter_horizontal = ('students',)  # Makes the student selection easier
+from django.contrib import admin
+from .models import Group
 
-admin.site.register(Group, GroupAdmin)
+# Unregister if it was registered before
+try:
+    admin.site.unregister(Group)
+except admin.sites.NotRegistered:
+    pass
+
+@admin.register(Group)
+class GroupAdmin(admin.ModelAdmin):
+    list_display = ('name', 'department')
+    list_filter = ('department',)
+    search_fields = ('name', 'department__name')
+
 
 
 from django.contrib import admin
@@ -162,3 +172,25 @@ class CourseAdmin(admin.ModelAdmin):
     list_display = ('title', 'difficulty', 'is_public', 'created_by')
     inlines = [CourseContentInline]
     filter_horizontal = ('groups',)
+
+
+from .models import ActionPermission, Role, Department, UserProfile
+
+@admin.register(ActionPermission)
+class ActionPermissionAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "description")
+    search_fields = ("code", "name")
+
+@admin.register(Role)
+class RoleAdmin(admin.ModelAdmin):
+    list_display = ("name", "description")
+    filter_horizontal = ("permissions",)
+
+@admin.register(Department)
+class DepartmentAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "hod")
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ("user", "role", "department")
+    filter_horizontal = ("custom_permissions",)
