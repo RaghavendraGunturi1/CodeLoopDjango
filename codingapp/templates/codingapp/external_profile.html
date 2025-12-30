@@ -1,0 +1,125 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+
+<h3>External Coding Profiles</h3>
+
+<form method="post" class="mb-4">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button class="btn btn-primary">Save & Sync</button>
+</form>
+
+{# =======================
+   Codeforces Section
+   ======================= #}
+{% if profile.codeforces_stats %}
+<hr>
+<h4>Codeforces Stats</h4>
+
+<ul>
+    <li><strong>Handle:</strong> {{ profile.codeforces_stats.handle }}</li>
+    <li><strong>Rating:</strong> {{ profile.codeforces_stats.rating }}</li>
+    <li><strong>Max Rating:</strong> {{ profile.codeforces_stats.max_rating }}</li>
+    <li><strong>Rank:</strong> {{ profile.codeforces_stats.rank }}</li>
+    <li><strong>Total Problems Solved:</strong>
+        {{ profile.codeforces_stats.total_problems_solved }}</li>
+    <li><strong>Accepted Submissions:</strong>
+        {{ profile.codeforces_stats.accepted_submissions }}</li>
+    <li><strong>Contests Participated:</strong>
+        {{ profile.codeforces_stats.contests_participated }}</li>
+</ul>
+
+<h5>Languages Used</h5>
+<ul>
+    {% for lang, count in profile.codeforces_stats.languages.items %}
+        <li>{{ lang }} — {{ count }}</li>
+    {% empty %}
+        <li>No language data available</li>
+    {% endfor %}
+</ul>
+
+<p class="text-muted">
+    <small>Last synced: {{ profile.last_synced }}</small>
+</p>
+{% else %}
+<p class="text-muted">
+    No Codeforces data available. Add a username and sync.
+</p>
+{% endif %}
+
+{# =======================
+   LeetCode Section
+   ======================= #}
+{% if profile.leetcode_stats %}
+<hr>
+<h4>LeetCode Stats</h4>
+
+<ul>
+    <li><strong>Total Solved:</strong>
+        {{ profile.leetcode_stats.total_solved }}</li>
+    <li><strong>Easy:</strong>
+        {{ profile.leetcode_stats.easy_solved }}</li>
+    <li><strong>Medium:</strong>
+        {{ profile.leetcode_stats.medium_solved }}</li>
+    <li><strong>Hard:</strong>
+        {{ profile.leetcode_stats.hard_solved }}</li>
+    <li><strong>Ranking:</strong>
+        {{ profile.leetcode_stats.ranking }}</li>
+</ul>
+{% else %}
+<p class="text-muted">
+    No LeetCode data available. Add a username and sync.
+</p>
+{% endif %}
+
+{# =======================
+   CodeChef Section
+   ======================= #}
+{% if profile.codechef_stats %}
+<hr>
+<h4>CodeChef Stats</h4>
+
+<ul>
+    <li><strong>Rating:</strong> {{ profile.codechef_stats.rating }}</li>
+    <li><strong>Highest Rating:</strong> {{ profile.codechef_stats.highest_rating }}</li>
+    <li><strong>Stars:</strong> {{ profile.codechef_stats.stars }}</li>
+    <li><strong>Global Rank:</strong> {{ profile.codechef_stats.global_rank }}</li>
+    <li><strong>Country Rank:</strong> {{ profile.codechef_stats.country_rank }}</li>
+    <li><strong>Problems Solved:</strong> {{ profile.codechef_stats.problems_solved }}</li>
+</ul>
+{% else %}
+<p class="text-muted">
+    No CodeChef data available.
+</p>
+{% endif %}
+{# =======================
+   HackerRank Section
+   ======================= #}
+{% if profile.hackerrank_username %}
+<hr>
+<h4>HackerRank</h4>
+
+<p>
+    <strong>Profile:</strong>
+    <a href="https://www.hackerrank.com/{{ profile.hackerrank_username }}"
+       target="_blank">
+        https://www.hackerrank.com/{{ profile.hackerrank_username }}
+    </a>
+</p>
+
+{% if profile.hackerrank_verified %}
+    <p class="text-success">Verified</p>
+{% endif %}
+
+<a href="https://www.hackerrank.com/{{ profile.hackerrank_username }}"
+   target="_blank"
+   class="btn btn-outline-success mt-2">
+    View Badges on HackerRank
+</a>
+
+<p class="text-muted mt-2">
+    Badges are displayed directly on HackerRank for accuracy.
+</p>
+{% endif %}
+
+{% endblock %}

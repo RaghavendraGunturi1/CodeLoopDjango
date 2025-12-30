@@ -6,7 +6,50 @@
 {% block welcome_styles %}
 <style>
     /* --- CSS OVERRIDES APPLIED ONLY TO THE WELCOME PAGE --- */
-    
+
+    /* 0. ACE Logo styling (top-right) */
+    .ace-logo-container {
+        position: fixed;
+        top: 18px;
+        right: 20px;
+        z-index: 1100; /* above navbar and spline */
+        pointer-events: auto;
+    }
+
+    .ace-logo {
+        height: 90px;
+        width: auto;
+        display: block;
+        transition: transform .15s ease, box-shadow .15s ease;
+        filter: drop-shadow(0 4px 8px rgba(0,0,0,0.18));
+        background: rgba(255,255,255,0.0);
+        border-radius: 6px;
+        padding: 2px;
+    }
+
+    .ace-logo:hover {
+        transform: scale(1.05);
+        filter: drop-shadow(0 6px 12px rgba(0,0,0,0.22));
+    }
+
+    @media (max-width: 992px) {
+        .ace-logo {
+            height: 60px;
+        }
+        .ace-logo-container {
+            top: 12px;
+            right: 12px;
+        }
+    }
+
+    @media (max-width: 576px) {
+        .ace-logo {
+            height: 45px;
+        }
+    }
+
+    /* --- Existing overrides --- */
+
     /* 1. Reset Body & Background Boxes to enable full-screen transparency */
     body {
         padding-top: 0 !important;
@@ -35,6 +78,19 @@
     .spline-embed-box {
         pointer-events: auto;
     }
+
+    /* 5. ACE Subtitle styling */
+    .ace-subtitle {
+        font-size: 1.8rem;
+        font-weight: 600;
+        background-image: linear-gradient(to right, #007bff, #00e6a1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-top: -10px;
+        margin-bottom: 30px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+    }
 </style>
 {% endblock %}
 
@@ -57,6 +113,13 @@
 
 
 {% block content %}
+{# --- ACE LOGO (top-right) --- #}
+<div class="ace-logo-container" aria-hidden="false">
+<a href="https://www.aceec.ac.in" target="_blank" rel="noopener">
+  <img src="{% static 'images/collegelogo.png' %}" alt="ACE Engineering College" class="ace-logo">
+</a>
+</div>
+
 <div class="container-fluid d-flex p-0" style="min-height: 100vh;">
     
     <div class="col-md-5 d-flex flex-column justify-content-center p-5 position-relative bg-light rounded-end shadow-lg" style="pointer-events: auto;">
@@ -70,6 +133,9 @@
             ">
             CODELOOP
         </h1>
+
+        <!-- New subtitle line -->
+        <h2 class="ace-subtitle">ACE Independent Platform</h2>
         
         <p class="lead text-secondary max-w-lg mb-5">
             A modern platform for interactive coding challenges and assessments, featuring an engaging 3D environment.

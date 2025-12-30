@@ -23,12 +23,21 @@ urlpatterns = [
     path('leaderboard/', views.leaderboard, name='leaderboard'),
     path('api/execute/<int:question_id>/', views.execute_code_api, name='execute_code_api'),
     path('api/status/<str:task_id>/', views.check_submission_status, name='check_submission_status'),
+    path("external-profile/", views.external_profile, name="external_profile"),
+
 
     # Authentication Routes
     path('register/', views.register, name='register'),
     path('login/', auth_views.LoginView.as_view(template_name='registration/login.html'), name='login'),
     path('logout/', auth_views.LogoutView.as_view(next_page='login'), name='logout'),
     path('clear-splash-flag/', views.clear_splash_flag, name='clear_splash_flag'),
+    path("register/teacher/", views.teacher_register, name="teacher_register"),
+    path("verify-otp/", views.verify_otp, name="verify_otp"),  # ✅ REQUIRED
+    path("forgot-password/", views.forgot_password, name="forgot_password"),
+    path("reset-password/", views.reset_password, name="reset_password"),
+
+
+
 
     # Module Routes
     path('modules/', views.module_list, name='module_list'),
@@ -46,6 +55,7 @@ urlpatterns = [
     path("assessments/<int:assessment_id>/result/", views.assessment_result, name="assessment_result"), # <-- ADD THIS LINE
     path("assessments/leaderboards/", views.assessment_leaderboard_list, name="assessment_leaderboard_list"), # <-- ADD THIS LINE
     path("assessments/<int:assessment_id>/leaderboard/export/csv/", views.export_assessment_leaderboard_csv, name="export_assessment_leaderboard_csv"),
+    path("assessments/<int:assessment_id>/heartbeat/", views.assessment_heartbeat, name="assessment_heartbeat"),
 
     # Teacher: Module Management
     path('teacher/modules/', views.teacher_module_list, name='teacher_module_list'),
@@ -125,5 +135,30 @@ urlpatterns = [
     path('teacher/student-performance/<int:student_id>/', student_performance_detail, name='student_performance_detail'),
     path('teacher/student-performance/export/', views.export_student_performance, name='export_student_performance'),
     path('modules/<int:module_id>/mark-completed/', views.mark_module_completed, name='mark_module_completed'),
+    path("save-hackerrank-badges/", views.save_hackerrank_badges, name="save_hackerrank_badges"),
+     path(
+     "student-performance/<int:student_id>/sync-external/",
+     views.sync_student_external_profiles,
+     name="sync_student_external_profiles"
+     ),
+
+    
 
     ]
+
+from django.contrib.auth import views as auth_views
+
+urlpatterns += [
+    path("password-reset/",
+         auth_views.PasswordResetView.as_view(),
+         name="password_reset"),
+    path("password-reset/done/",
+         auth_views.PasswordResetDoneView.as_view(),
+         name="password_reset_done"),
+    path("reset/<uidb64>/<token>/",
+         auth_views.PasswordResetConfirmView.as_view(),
+         name="password_reset_confirm"),
+    path("reset/done/",
+         auth_views.PasswordResetCompleteView.as_view(),
+         name="password_reset_complete"),
+]

@@ -1,22 +1,37 @@
 import os
 from pathlib import Path
 import dj_database_url
-from dotenv import load_dotenv # Add this
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv() # And this
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-default-secret-key')
-DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
+#DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
+# In codingplatform/settings.py (for debugging only)
+DEBUG = True
 JUDGE0_API_KEY = os.environ.get('JUDGE0_API_KEY')
-#DEBUG = True
-#PISTON_API_URL = "https://emkc.org/api/v2/piston/execute"
-#PISTON_API_URL = "http://localhost:2000/api/v2/execute"
 PISTON_API_URL = os.environ.get('PISTON_API_URL', 'https://emkc.org/api/v2/piston/execute')
 SUPPORTED_LANGUAGES = ["python", "c", "cpp", "java", "javascript"]
 
 
-#ALLOWED_HOSTS = ['localhost', '127.0.0.1','192.168.72.169']
-ALLOWED_HOSTS = ['localhost', '127.0.0.1','nonfiguratively-unconfected-lora.ngrok-free.dev','*']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1','nonfiguratively-unconfected-lora.ngrok-free.dev','www.acecodeloop.me','acecodeloop.me','https://www.acecodeloop.me',
+'*']
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.ngrok-free.app',
+    'https://*.ngrok-free.dev',
+    'https://*.cloudflare-tunnel.dev',
+    'https://*.eu.org',
+    'https://www.acecodeloop.me',
+    'https://acecodeloop.me',
+    'https://*.devtunnels.ms',
+    'https://*.inc1.devtunnels.ms',
+    'https://*.trycloudflare.com',
+    'https://acecodeloop.me',
+    'https://acecodeloop.me',
+    'https://www.acecodeloop.me',
+
+]
 
 RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
 if RENDER_EXTERNAL_HOSTNAME:
@@ -28,13 +43,11 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'whitenoise.runserver_nostatic', 
     'django.contrib.staticfiles',
     'codingapp',
     "widget_tweaks",
 ]
-
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
 
 
 MIDDLEWARE = [
@@ -71,18 +84,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'codingplatform.wsgi.application'
 
-#DATABASES = {
- #   'default': {
-  #      'ENGINE': 'django.db.backends.sqlite3',
-   #     'NAME': BASE_DIR / "db.sqlite3",
-    #}
-#}
-#DATABASES = {
-   # 'default': dj_database_url.config(
-  #      default='sqlite:///db.sqlite3',
- #       conn_max_age=600
-#    )
-#}
 
 DATABASES = {
     'default': {
@@ -95,10 +96,7 @@ DATABASES = {
     }
 }
 
-SESSION_ENGINE = 'django.contrib.sessions.backends.db'  # ✅ Use database-backed session storage
-CSRF_TRUSTED_ORIGINS = [
-    'https://nonfiguratively-unconfected-lora.ngrok-free.dev',
-]
+SESSION_ENGINE = 'django.contrib.sessions.backends.db' 
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -112,10 +110,17 @@ TIME_ZONE = 'Asia/Kolkata'
 USE_I18N = True
 USE_TZ = True
 
+# --- ⭐ CORRECTED STATIC AND MEDIA CONFIGURATION ---
 STATIC_URL = '/static/'
-
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# We only list the static directory inside codingapp, for collectstatic to find.
+STATICFILES_DIRS = [os.path.join(BASE_DIR, 'codingapp/static')] 
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# --- END CORRECTION ---
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 LOGIN_URL = 'login'
@@ -137,27 +142,29 @@ LOGGING = {
     },
 }
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-STATIC_URL = 'static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-
-# ⭐ FIX: Add this setting to tell Django where to find your app's static files
-STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'codingapp/static'),
-]
-
 # ----------------
 # CELERY CONFIGURATION
 # ----------------
-
-
-
-# ... inside CELERY CONFIGURATION ...
 CELERY_BROKER_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6380/0')
 CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6380/0')
-# ... rest of celery settings
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TASK_TIME_LIMIT = 300 # Max task execution time (5 minutes)
-CELERY_TASK_SOFT_TIME_LIMIT = 240 # Soft time limit (4 minutes)
+CELERY_TASK_TIME_LIMIT = 300 
+CELERY_TASK_SOFT_TIME_LIMIT = 240
+CELERY_TASK_IGNORE_RESULT = False
+CELERY_TASK_STORE_ERRORS_EVEN_IF_IGNORED = True
+CELERY_RESULT_EXTENDED = True
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# ================= EMAIL CONFIG (GMAIL) =================
+
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "smtp.gmail.com"
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+
+EMAIL_HOST_USER = "vsrgunturi@gmail.com"
+EMAIL_HOST_PASSWORD = "mksm kshu rzgz eyjz"
+
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER

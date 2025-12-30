@@ -3,75 +3,76 @@
 <div class="container">
   <h2 class="mb-4">Student Performance Overview</h2>
 
-  <form method="get" class="row g-3 mb-4">
-    <div class="col-md-3">
-      <select name="group" class="form-select">
-        <option value="">All Groups</option>
-        {% for group in groups %}
-          <option value="{{ group.id }}" {% if group.id|stringformat:"s" == selected_group_id %}selected{% endif %}>
-            {{ group.name }}
-          </option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div class="col-md-3">
-      <input type="text" name="q" placeholder="Search by username" value="{{ search_query }}" class="form-control">
-    </div>
-
-    <div class="col-md-3">
-      <select name="sort" class="form-select">
-        <option value="">Sort by</option>
-        <option value="top_performer" {% if sort_key == 'top_performer' %}selected{% endif %}>🏆 Top All-Round Performance</option>
-        <option value="submissions" {% if sort_key == 'submissions' %}selected{% endif %}>Total Submissions</option>
-        <option value="accepted" {% if sort_key == 'accepted' %}selected{% endif %}>Accepted Submissions</option>
-        <option value="quizzes" {% if sort_key == 'quizzes' %}selected{% endif %}>Quizzes Taken</option>
-        <option value="score" {% if sort_key == 'score' %}selected{% endif %}>Quiz Score</option>
-      </select>
-    </div>
-
-    <div class="col-md-3">
-      <button type="submit" class="btn btn-primary w-100">Apply</button>
-    </div>
-  </form>
-
-  <table class="table table-bordered table-hover">
+  <table class="table table-bordered table-hover align-middle">
     <thead class="table-light">
       <tr>
-        <th>Username</th>
-        <th>Total Coding Submissions</th>
-        <th>Accepted</th>
-        <th>Quizzes Taken</th>
-        <th>Avg. Quiz Score</th>
-        <th>Modules Completed</th>
+        <th>Student</th>
+        <th>Internal Score</th>
+        <th>Codeforces</th>
+        <th>LeetCode</th>
+        <th>CodeChef</th>
+        <th>View</th>
       </tr>
     </thead>
+
     <tbody>
       {% for entry in performance_data %}
         <tr>
           <td>
-            {% if entry.student.id %}
-              <a href="{% url 'student_performance_detail' entry.student.id %}">
-                {{ entry.student.username }}
-              </a>
+            {{ entry.student.get_full_name|default:entry.student.username }}
+          </td>
+
+          <td>
+            <strong>{{ entry.internal_score }}</strong>
+            <br>
+            <small class="text-muted">
+              Coding: {{ entry.assessment_score }},
+              Quiz: {{ entry.quiz_score }}
+            </small>
+          </td>
+
+          <td>
+            {% if entry.external.codeforces %}
+              Rating: {{ entry.external.codeforces.rating|default:"—" }}<br>
+              Solved: {{ entry.external.codeforces.total_problems_solved|default:"—" }}
             {% else %}
               <span class="text-muted">N/A</span>
             {% endif %}
           </td>
-          <td>{{ entry.total_coding }}</td>
-          <td>{{ entry.accepted_coding }}</td>
-          <td>{{ entry.total_quizzes }}</td>
-          <td>{{ entry.avg_quiz_score }}</td>
-          <td>{{ entry.completed_modules }} / {{ entry.total_modules }}</td>
+
+          <td>
+            {% if entry.external.leetcode %}
+              Solved: {{ entry.external.leetcode.total_solved|default:"—" }}<br>
+              Rank: {{ entry.external.leetcode.ranking|default:"—" }}
+            {% else %}
+              <span class="text-muted">N/A</span>
+            {% endif %}
+          </td>
+
+          <td>
+            {% if entry.external.codechef %}
+              Solved: {{ entry.external.codechef.problems_solved|default:"—" }}<br>
+              Rating: {{ entry.external.codechef.rating|default:"—" }}
+            {% else %}
+              <span class="text-muted">N/A</span>
+            {% endif %}
+          </td>
+
+          <td>
+            <a href="{% url 'student_performance_detail' entry.student.id %}"
+               class="btn btn-sm btn-outline-primary">
+              Details
+            </a>
+          </td>
         </tr>
       {% empty %}
-        <tr><td colspan="6" class="text-center">No students found.</td></tr>
+        <tr>
+          <td colspan="6" class="text-center text-muted">
+            No students available.
+          </td>
+        </tr>
       {% endfor %}
     </tbody>
   </table>
-
-  <a href="{% url 'export_student_performance' %}?group={{ selected_group_id }}&q={{ search_query }}&sort={{ sort_key }}" class="btn btn-outline-success mb-3">
-    <i class="bi bi-download me-1"></i> Export CSV
-  </a>
 </div>
 {% endblock %}

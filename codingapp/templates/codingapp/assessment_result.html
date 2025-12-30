@@ -1,4 +1,6 @@
 {% extends 'codingapp/base.html' %}
+{% load dict_extras %}
+
 
 {% block title %}Assessment Result - {{ assessment.title }}{% endblock %}
 
@@ -9,11 +11,36 @@
         <p class="lead">Here is a summary of your performance for <strong>{{ assessment.title }}</strong>.</p>
         {% if request.GET.ended == 'auto' %}
             <div class="alert alert-danger mt-3">
-                <strong>This assessment was automatically submitted because you switched tabs more than 3 times.</strong>
+                <strong>This assessment was automatically submitted because you violated the focus rules after your one allowed warning.</strong>
             </div>
         {% endif %}
         <hr>
         <h3>Your Total Score: {{ total_score }}</h3>
+            <!-- Add plagiarism summary -->
+    <div class="mt-3 mb-3">
+        <h4>Plagiarism Report</h4>
+        <p><strong>Highest match:</strong> {{ plag_overall_max }}% &nbsp; | &nbsp; <strong>Average match:</strong> {{ plag_overall_avg }}%</p>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered">
+                <thead>
+                    <tr><th>Question</th><th>Your Highest Match (%)</th></tr>
+                </thead>
+                <tbody>
+                    {% for sub in submissions %}
+                    <tr>
+                        <td>{{ sub.question.title }}</td>
+                        <td>
+                            {# use get_item filter directly; it returns 0 if key missing #}
+                            {{ plag_per_question|get_item:sub.question.id }}%
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     </div>
 
     <h4 class="mt-4">Submission Details:</h4>

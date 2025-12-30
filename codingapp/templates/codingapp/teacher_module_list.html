@@ -12,7 +12,7 @@
       <td>{{ module.title }}</td>
       <td>{{ module.description }}</td>
       <td>
-        <a href="{% url 'teacher_edit_module' module.id %}" class="btn btn-sm btn-warning">Edit</a>
+        <a href="{% url 'edit_module' module.id %}" class="btn btn-sm btn-warning">Edit</a>
         <a href="{% url 'teacher_delete_module' module.id %}" class="btn btn-sm btn-danger">Delete</a>
       </td>
     </tr>

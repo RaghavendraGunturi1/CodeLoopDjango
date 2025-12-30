@@ -22,6 +22,11 @@
             {% for error in form.non_field_errors %}
               <li>{{ error }}</li>
             {% endfor %}
+            <div class="mb-3">
+                {{ form.role.label_tag }}
+                {{ form.role }}
+                {{ form.role.errors }}
+            </div>
           </ul>
         </div>
       {% endif %}

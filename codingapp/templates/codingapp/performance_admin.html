@@ -1,0 +1,77 @@
+{% extends "codingapp/base.html" %}
+{% block content %}
+<h2>Departments</h2>
+
+{% for dept in departments %}
+<div class="card mb-4">
+
+  <div class="card-header bg-dark text-white"
+       data-bs-toggle="collapse"
+       data-bs-target="#dept{{ dept.department.id }}"
+       role="button"
+       style="cursor:pointer">
+    {{ dept.department.name }}
+  </div>
+
+  <div id="dept{{ dept.department.id }}" class="collapse">
+    <div class="card-body">
+
+      {% for block in dept.groups %}
+      <div class="card mb-2">
+
+        <div class="card-header bg-light"
+             data-bs-toggle="collapse"
+             data-bs-target="#group{{ block.group.id }}"
+             role="button"
+             style="cursor:pointer">
+          {{ block.group.name }}
+        </div>
+
+        <div id="group{{ block.group.id }}" class="collapse">
+          <div class="card-body">
+
+            <input type="text" class="form-control mb-2"
+              placeholder="Search students"
+              onkeyup="filterTable('{{ block.group.id }}', this.value)">
+
+            <table class="table table-sm group-table"
+                   data-group="{{ block.group.id }}">
+              <tbody>
+                {% for entry in block.students %}
+                <tr>
+                  <td class="student-name">{{ entry.student.username }}</td>
+                  <td>{{ entry.internal_score }}</td>
+                  <td>
+                    <a href="{% url 'student_performance_detail' entry.student.id %}">
+                      View
+                    </a>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<script>
+function filterTable(id, q) {
+  q = q.toLowerCase();
+  document.querySelectorAll(
+    `.group-table[data-group="${id}"] tr`
+  ).forEach(row => {
+    row.style.display =
+      row.querySelector(".student-name")
+         .innerText.toLowerCase()
+         .includes(q) ? "" : "none";
+  });
+}
+</script>
+{% endblock %}

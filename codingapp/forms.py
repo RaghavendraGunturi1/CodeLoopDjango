@@ -3,9 +3,18 @@ from django import forms
 from .models import Module, Question
 import json
 
+from .models import Module, Question, Group # Ensure Module and Group are imported
+class ModuleForm(forms.ModelForm):
+    class Meta:
+        model = Module
+        fields = ["title", "description", "is_public", "groups"]
+        widgets = {
+            "title": forms.TextInput(attrs={"class": "form-control"}),
+            "description": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+            "is_public": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "groups": forms.CheckboxSelectMultiple(),  # ✅ FIXED
+        }
 
-from .models import Group
-from django import forms
 
 from django.forms import formset_factory
 
@@ -94,9 +103,10 @@ class QuizForm(forms.ModelForm):
     questions = forms.ModelMultipleChoiceField(
         queryset=Question.objects.filter(question_type='mcq'),
         widget=forms.SelectMultiple(attrs={'class': 'form-control', 'size': 15}),
-        required=True,
+        required=False,   # 👈 MAKE OPTIONAL
         help_text="Hold Ctrl (Windows) or Cmd (Mac) to select multiple questions."
     )
+
     class Meta:
         model = Quiz
         fields = ['title', 'description', 'questions']
@@ -123,24 +133,9 @@ class AssessmentForm(forms.ModelForm):
             'questions': forms.SelectMultiple(attrs={'class': 'form-control'}),
         }
 
-<<<<<<< HEAD
-=======
-
-from django import forms
-from .models import Module, Group
-
-class ModuleForm(forms.ModelForm):
-    class Meta:
-        model = Module
-        fields = ['title', 'description', 'groups']  # ✅ include 'groups' here
-        widgets = {
-            'title': forms.TextInput(attrs={'class': 'form-control'}),
-            'description': forms.Textarea(attrs={'class': 'form-control'}),
-            'groups': forms.SelectMultiple(attrs={'class': 'form-select'}),  # ✅ style the multi-select
-        }
 
 
->>>>>>> b980e73c86f546779e855c649cbd39afa579f86c
+
 from django import forms
 from .models import Group
 
@@ -168,28 +163,223 @@ from django import forms
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
 
+# codingapp/forms.py
+
+from django import forms
+from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.models import User
+import re
+from .models import Group, Department
+
+# codingapp/forms.py
+
+from django import forms
+from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.models import User
+import re
+from .models import Group, Department
+
 class RegistrationForm(UserCreationForm):
-    full_name = forms.CharField(max_length=100, required=True, label='Full Name')
+    ROLE_CHOICES = (
+        ("student", "Student"),
+        ("teacher", "Teacher"),
+    )
+
+    role = forms.ChoiceField(choices=ROLE_CHOICES)
     email = forms.EmailField(required=True)
-    # Add other fields as needed
+
+    # used for both:
+    # student → roll number
+    # teacher → custom username
+    username_input = forms.CharField(
+        max_length=30,
+        label="Roll Number / Username"
+    )
+
+    group = forms.ModelChoiceField(
+        queryset=Group.objects.all(),
+        required=False
+    )
+    department = forms.ModelChoiceField(
+        queryset=Department.objects.all(),
+        required=True
+    )
 
     class Meta:
         model = User
-        fields = ("username", "full_name", "email", "password1", "password2")
+        fields = (
+            "username_input",
+            "email",
+            "password1",
+            "password2",
+            "role",
+            "group",
+            "department",
+        )
 
-    def save(self, commit=True):
-        user = super().save(commit=False)
-        # Split full name into first and last (optional, or just save as first_name)
-        full_name = self.cleaned_data.get('full_name', '').strip()
-        if ' ' in full_name:
-            user.first_name, user.last_name = full_name.split(' ', 1)
+    def clean_username_input(self):
+        username = self.cleaned_data["username_input"]
+        role = self.cleaned_data.get("role")
+
+        if role == "student":
+            # STRICT roll number rules
+            if not re.fullmatch(r"[0-9]{2}[A-Z0-9]{4}[0-9]{2}[A-Z0-9]{2}", username):
+                raise forms.ValidationError(
+                    "Invalid roll number format. Example: 23AGCS0123"
+                )
         else:
-            user.first_name = full_name
-            user.last_name = ''
-        user.email = self.cleaned_data['email']
-        if commit:
-            user.save()
-        return user
+            # Teacher: allow anything except spaces
+            if " " in username:
+                raise forms.ValidationError(
+                    "Username should not contain spaces"
+                )
+
+        return username
+
+    def clean_email(self):
+        email = self.cleaned_data["email"]
+        role = self.cleaned_data.get("role")
+
+        if role == "teacher" and not email.endswith("@aceec.ac.in"):
+            raise forms.ValidationError(
+                "Teachers must use an @aceec.ac.in email address"
+            )
+
+        return email
+
+    def clean(self):
+        cleaned = super().clean()
+        role = cleaned.get("role")
+        group = cleaned.get("group")
+
+        if role == "student" and not group:
+            self.add_error("group", "Group is required for students")
+
+        return cleaned
+
+
+
+from django import forms
+from django.contrib.auth.models import User
+from codingapp.models import Group, Department
+from codingapp.utils import validate_roll_number
+
+from django import forms
+from django.contrib.auth.models import User
+from codingapp.models import Group, Department
+import re
+
+ROLL_REGEX = r"^[0-9]{2}[A-Z0-9]{4}[0-9]{2}[A-Z0-9]{2}$"
+
+from django import forms
+from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.models import User
+from codingapp.models import Department, Group
+
+ROLE_CHOICES = (
+    ("student", "Student"),
+    ("teacher", "Teacher"),
+)
+
+class StudentRegistrationForm(UserCreationForm):
+    roll_number = forms.CharField(
+        max_length=10,
+        label="Roll Number",
+        help_text="Example: 23AGCS0123"
+    )
+
+    email = forms.EmailField(required=True)
+
+    role = forms.ChoiceField(
+        choices=ROLE_CHOICES,
+        required=True,
+        label="Register As"
+    )
+
+    department = forms.ModelChoiceField(
+        queryset=Department.objects.all(),
+        required=True
+    )
+
+    group = forms.ModelChoiceField(
+        queryset=Group.objects.all(),
+        required=False,
+        help_text="Required only for students"
+    )
+
+    class Meta:
+        model = User
+        fields = (
+            "roll_number",
+            "email",
+            "role",
+            "department",
+            "group",
+            "password1",
+            "password2",
+        )
+
+    # -------------------------------
+    # Roll number validation
+    # -------------------------------
+    def clean_roll_number(self):
+        roll = self.cleaned_data["roll_number"]
+
+        if len(roll) != 10:
+            raise forms.ValidationError("Roll number must be exactly 10 characters")
+
+        if not roll.isalnum():
+            raise forms.ValidationError("Only capital letters and numbers allowed")
+
+        if not roll[:2].isdigit():
+            raise forms.ValidationError("First 2 characters must be numbers")
+
+        if not roll[2:6].isalnum():
+            raise forms.ValidationError("Characters 3–6 must be alphanumeric")
+
+        if not roll[6:8].isdigit():
+            raise forms.ValidationError("Characters 7–8 must be numbers")
+
+        if not roll[8:10].isalnum():
+            raise forms.ValidationError("Characters 9–10 must be alphanumeric")
+
+        return roll.upper()
+
+    # -------------------------------
+    # Cross-field validation
+    # -------------------------------
+    def clean(self):
+        cleaned = super().clean()
+        role = cleaned.get("role")
+        group = cleaned.get("group")
+
+        if role == "student" and not group:
+            self.add_error("group", "Students must select a group")
+
+        if role == "teacher":
+            cleaned["group"] = None  # teachers don't belong to student groups
+
+        return cleaned
+
+
+class TeacherRegistrationForm(forms.Form):
+    username = forms.CharField(max_length=150)
+    email = forms.EmailField(label="Official Email")
+    password1 = forms.CharField(widget=forms.PasswordInput)
+    password2 = forms.CharField(widget=forms.PasswordInput)
+    department = forms.ModelChoiceField(queryset=Department.objects.all())
+
+    def clean_email(self):
+        email = self.cleaned_data["email"].lower()
+        if not email.endswith("@aceec.ac.in"):
+            raise forms.ValidationError("Teachers must use @aceec.ac.in email")
+        return email
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("password1") != cleaned.get("password2"):
+            self.add_error("password2", "Passwords do not match")
+        return cleaned
 
 
 from django import forms
@@ -317,16 +507,61 @@ CourseContentFormSet = inlineformset_factory(
 )
 
 
-class ModuleForm(forms.ModelForm):
+
+from django import forms
+
+class ForgotPasswordForm(forms.Form):
+    email = forms.EmailField(
+        label="Registered Email",
+        widget=forms.EmailInput(attrs={"class": "form-control"})
+    )
+
+
+class ResetPasswordForm(forms.Form):
+    otp = forms.CharField(
+        max_length=6,
+        widget=forms.TextInput(attrs={"class": "form-control"})
+    )
+    new_password = forms.CharField(
+        widget=forms.PasswordInput(attrs={"class": "form-control"})
+    )
+    confirm_password = forms.CharField(
+        widget=forms.PasswordInput(attrs={"class": "form-control"})
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("new_password") != cleaned.get("confirm_password"):
+            raise forms.ValidationError("Passwords do not match")
+        return cleaned
+
+
+from django import forms
+from codingapp.models import ExternalProfile
+
+class ExternalProfileForm(forms.ModelForm):
     class Meta:
-        model = Module
-        # ⭐ FIX: Include both new fields (is_public and groups)
-        fields = ["title", "description", "is_public", "groups"] 
+        model = ExternalProfile
+        fields = [
+            "codeforces_username",
+            "leetcode_username",
+            "codechef_username",
+            "hackerrank_username",
+
+
+        ]
         widgets = {
-            "title": forms.TextInput(attrs={"class": "form-control"}),
-            "description": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
-            # Use CheckboxInput for is_public (for the template's form-check structure)
-            "is_public": forms.CheckboxInput(attrs={"class": "form-check-input"}),
-            # Use CheckboxSelectMultiple for groups (needed for manual rendering loop)
-            "groups": forms.CheckboxSelectMultiple, 
+            "codeforces_username": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "Codeforces username"}
+            ),
+            "leetcode_username": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "LeetCode username"}
+            ),
+            "codechef_username": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "CodeChef username"}
+            ),
+            "hackerrank_username": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "HackerRank username"}
+            ),
+
         }

@@ -6,13 +6,12 @@
     body {
         /* Remove padding from the main navbar which is now hidden */
         padding-top: 0 !important;
-        /* Prevent the whole page from scrolling, as we'll control scrolling inside */
+        /* Prevent the whole page from scrolling while overlay active */
         overflow: hidden;
     }
     .main-content {
-        /* Remove default padding to make the assessment container flush to the edges */
         padding: 0 !important;
-        height: 100vh; /* Make the main container take up the full viewport height */
+        height: 100vh;
     }
     #assessment-container {
         height: 100%;
@@ -20,10 +19,46 @@
         flex-direction: column;
     }
     .assessment-content-card {
-        flex-grow: 1; /* Allow this card to fill all available vertical space */
-        overflow-y: auto; /* Make ONLY this card scrollable */
-        margin-bottom: 0 !important; /* Remove any bottom margin that might push content down */
+        flex-grow: 1;
+        overflow-y: auto;
+        margin-bottom: 0 !important;
     }
+
+    /* Overlay: resets and layout to avoid site-wide CSS breaking text */
+    #start-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 2000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(10,10,10,0.88);
+        color: #fff;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+
+    #start-overlay .box {
+        width: min(760px, 92vw);
+        max-width: 760px;
+        padding: 28px 30px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 12px;
+        text-align: center;
+        box-shadow: 0 12px 36px rgba(0,0,0,0.65);
+        /* reset inherited problematic styles */
+        white-space: normal !important;
+        word-break: break-word !important;
+        letter-spacing: normal !important;
+        line-height: 1.4 !important;
+        font-family: inherit !important;
+        font-size: 16px !important;
+    }
+
+    #start-overlay h3 { margin: 0 0 8px; font-size: 22px; font-weight: 600; }
+    #start-overlay p { margin: 8px 0 16px; color: rgba(255,255,255,0.92); font-size: 15px; }
+    #start-overlay .btn { min-width: 300px; padding: 12px 22px; font-size: 16px; border-radius: 8px; }
+    .overlay-hidden { display: none !important; }
 </style>
 {% endblock %}
 
@@ -34,7 +69,7 @@
         <div class="d-flex justify-content-between align-items-center">
             <h4 class="mb-0 text-primary">{{ assessment.title }}</h4>
             <div class="d-flex align-items-center">
-                <strong class="me-3 text-warning">Warnings: <span id="warning-count">0</span> / 3</strong>
+                <strong class="me-3 text-warning">Warnings: <span id="warning-count">0</span> / 1</strong>
                 <strong class="me-3">Time Left: <span id="assessment-timer" class="text-danger fw-bold h5"></span></strong>
                 <a href="{% url 'assessment_result' assessment.id %}" id="end-assessment-btn" class="btn btn-danger">End Assessment</a>
             </div>
@@ -61,70 +96,278 @@
         {% block assessment_content %}{% endblock %}
     </div>
 </div>
+
+{# START OVERLAY: shown only when focus_mode is enabled and assessment hasn't started #}
+{% if focus_mode %}
+<div id="start-overlay" role="dialog" aria-modal="true" aria-labelledby="start-overlay-title">
+    <div class="box" role="document">
+        <h3 id="start-overlay-title">Start Assessment — Focus Mode</h3>
+
+        {# overlay-subtext will be updated dynamically to show initial or post-violation message #}
+        <p id="overlay-subtext">
+            Please enter fullscreen to start. This ensures a fair testing environment. You have one warning for
+            switching tabs or exiting fullscreen; on the second violation the assessment will be automatically submitted.
+        </p>
+
+        <div class="d-flex justify-content-center">
+            <button id="start-fullscreen-btn" class="btn btn-lg btn-primary">
+                Enter Fullscreen &amp; Start Assessment
+            </button>
+        </div>
+
+        <p class="mt-3 small text-muted">
+            If the browser blocks fullscreen, click the button again. Fullscreen must be enabled to start the assessment.
+        </p>
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// Make 'editor' a global variable so child templates can assign to it
 var editor;
-
 document.addEventListener("DOMContentLoaded", function () {
-    const MAX_WARNINGS = 3;
+
+    const MAX_CLIENT_WARNINGS = 1;    // 1 allowed warning; second violation -> auto submit
+    const WARNING_DEBOUNCE_MS = 5000; // 5s debounce to avoid double-counting
     const warningCountEl = document.getElementById('warning-count');
     const timerElement = document.getElementById("assessment-timer");
     const endAssessmentBtn = document.getElementById('end-assessment-btn');
-    
-    const warningStorageKey = `assessmentWarnings_{{ assessment.id }}_{{ user.id }}`;
 
-    function handleVisibilityChange() {
-        if (sessionStorage.getItem('isUnloading')) {
-            return;
-        }
+    const assessmentId = "{{ assessment.id }}";
+    const heartbeatUrl = "{% url 'assessment_heartbeat' assessment.id %}";
+    const heartbeatIntervalMs = 5000;
+    const warningStorageKey = `assessmentWarnings_${assessmentId}_{{ user.id }}`;
+    const lastViolationKey = `assessmentLastViolation_${assessmentId}_{{ user.id }}`;
 
-        if (document.hidden) {
-            let currentWarnings = parseInt(localStorage.getItem(warningStorageKey) || '0');
-            currentWarnings++;
-            localStorage.setItem(warningStorageKey, currentWarnings);
-            updateWarningDisplay(currentWarnings);
+    // grab overlay elements BEFORE using them
+    const startOverlay = document.getElementById('start-overlay');
+    const overlaySubtext = document.getElementById('overlay-subtext');
+    const startFSBtn = document.getElementById('start-fullscreen-btn');
 
-            if (currentWarnings > MAX_WARNINGS) {
-                document.removeEventListener('visibilitychange', handleVisibilityChange);
-                alert('You have exceeded the maximum number of tab switches. Your assessment will now be submitted.');
-                clearAssessmentState();
-                window.location.href = `{% url 'assessment_result' assessment.id %}?ended=auto`;
-            }
-        }
+    let heartbeatTimer = null;
+    let started = false; // only true after fullscreen entered and start
+
+    function getCookie(name) {
+        const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+        return v ? v.pop() : '';
     }
 
     function updateWarningDisplay(count) {
-        if (warningCountEl) {
-            warningCountEl.textContent = count;
+        if (warningCountEl) warningCountEl.textContent = count;
+    }
+
+    function clearAssessmentState() {
+        // use sessionStorage (per-tab) so each tab/attempt starts fresh
+        sessionStorage.removeItem(warningStorageKey);
+        sessionStorage.removeItem('isUnloading');
+        sessionStorage.removeItem(lastViolationKey);
+    }
+
+    function isInFullscreen() {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement);
+    }
+
+    function tryRequestFullscreen() {
+        const el = document.documentElement;
+        return new Promise((resolve, reject) => {
+            try {
+                if (el.requestFullscreen) {
+                    el.requestFullscreen().then(resolve).catch(reject);
+                } else if (el.webkitRequestFullscreen) {
+                    el.webkitRequestFullscreen();
+                    // webkit doesn't return a promise — wait a little then check
+                    setTimeout(() => isInFullscreen() ? resolve() : reject(new Error('No fullscreen')), 300);
+                } else if (el.mozRequestFullScreen) {
+                    el.mozRequestFullScreen();
+                    setTimeout(() => isInFullscreen() ? resolve() : reject(new Error('No fullscreen')), 300);
+                } else {
+                    reject(new Error('Fullscreen API not supported'));
+                }
+            } catch (e) {
+                reject(e);
+            }
+        });
+    }
+
+    function shouldDebounceViolation() {
+        const last = parseInt(sessionStorage.getItem(lastViolationKey) || '0', 10);
+        const now = Date.now();
+        if (now - last < WARNING_DEBOUNCE_MS) return true;
+        sessionStorage.setItem(lastViolationKey, now.toString());
+        return false;
+    }
+
+    // Show overlay with optional message (used initially and after first violation)
+    function showOverlay(message) {
+        if (!startOverlay) return;
+
+        // ensure per-tab warning counter exists and starts at 0
+        if (!sessionStorage.getItem(warningStorageKey)) {
+            sessionStorage.setItem(warningStorageKey, '0');
+        }
+
+        if (message && overlaySubtext) overlaySubtext.textContent = message;
+        startOverlay.classList.remove('overlay-hidden');
+        document.body.style.overflow = 'hidden';
+
+        // update UI to reflect the initialized session value
+        updateWarningDisplay(parseInt(sessionStorage.getItem(warningStorageKey) || '0'));
+    }
+
+    function hideOverlay() {
+        if (!startOverlay) return;
+        startOverlay.classList.add('overlay-hidden');
+        document.body.style.overflow = '';
+    }
+
+    // -----------------------------
+    // 🚫 MOBILE DEVICE BLOCK (CLIENT SIDE)
+    // (This must run AFTER overlay elements and showOverlay/hideOverlay are defined)
+    // -----------------------------
+    function isMobileClient() {
+        try {
+            if (navigator.userAgentData && "mobile" in navigator.userAgentData) {
+                return navigator.userAgentData.mobile;
+            }
+        } catch (e) {}
+        const ua = (navigator.userAgent || "").toLowerCase();
+        return /android|iphone|ipad|ipod|windows phone|mobile/i.test(ua);
+    }
+
+    const clientIsMobile = isMobileClient();
+
+    if (clientIsMobile) {
+        if (overlaySubtext) {
+            overlaySubtext.textContent =
+                "⚠ Mobile devices are not allowed for this assessment. Please use a laptop or desktop computer.";
+        }
+
+        if (startFSBtn) {
+            startFSBtn.disabled = true;
+            startFSBtn.classList.add("disabled");
+        }
+
+        // Keep the overlay open so exam cannot start
+        showOverlay();
+
+        // Stop all normal exam startup logic
+        return;
+    }
+
+    function handleClientViolation() {
+        // Do NOT count legitimate navigations (quiz submit / code submit / normal reload)
+        if (sessionStorage.getItem('isUnloading') === 'true') {
+            return;
+        }
+
+        if (shouldDebounceViolation()) return;
+
+        let currentWarnings = parseInt(sessionStorage.getItem(warningStorageKey) || '0');
+        currentWarnings++;
+        sessionStorage.setItem(warningStorageKey, currentWarnings.toString());
+        updateWarningDisplay(currentWarnings);
+
+        if (currentWarnings > MAX_CLIENT_WARNINGS) {
+            // second violation -> auto-submit
+            alert('You have violated the focus rules. The assessment will be submitted automatically.');
+            try {
+                const payload = JSON.stringify({ in_fullscreen: false });
+                if (navigator.sendBeacon) {
+                    const blob = new Blob([payload], { type: 'application/json' });
+                    navigator.sendBeacon(heartbeatUrl, blob);
+                } else {
+                    fetch(heartbeatUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCookie('csrftoken')
+                        },
+                        body: payload
+                    }).catch(() => {});
+                }
+            } catch (e) { /* ignore */ }
+
+            clearAssessmentState();
+            window.location.href = `{% url 'assessment_result' assessment.id %}?ended=auto`;
+        } else {
+            // first violation -> re-show overlay (one chance to recover)
+            showOverlay(
+                'You left fullscreen or switched tabs. This is your only warning — click the button to re-enter fullscreen and continue.'
+            );
         }
     }
 
-    window.addEventListener('beforeunload', function() {
-        sessionStorage.setItem('isUnloading', 'true');
-    });
-    
-    // Clear flag on new page load
-    sessionStorage.removeItem('isUnloading');
-
-    function clearAssessmentState() {
-        localStorage.removeItem(warningStorageKey);
-        sessionStorage.removeItem('isUnloading');
+    function sendHeartbeat(in_fullscreen) {
+        if (!started) return;
+        fetch(heartbeatUrl, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+            body: JSON.stringify({in_fullscreen: !!in_fullscreen})
+        }).then(r => r.json().catch(()=>null)).then(data => {
+            if (!data) return;
+            if (data.flagged) {
+                alert('Your session has been ended by the server due to focus violations.');
+                clearAssessmentState();
+                window.location.href = `{% url 'assessment_result' assessment.id %}?ended=auto`;
+            }
+        }).catch(()=>{});
     }
 
-    endAssessmentBtn.addEventListener('click', clearAssessmentState);
-    
-    updateWarningDisplay(parseInt(localStorage.getItem(warningStorageKey) || '0'));
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    function startHeartbeatAndTimer() {
+        started = true;
+        // initial heartbeat
+        sendHeartbeat(isInFullscreen());
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        heartbeatTimer = setInterval(() => sendHeartbeat(isInFullscreen()), heartbeatIntervalMs);
+        updateWarningDisplay(parseInt(sessionStorage.getItem(warningStorageKey) || '0'));
+        hideOverlay();
+    }
 
-    const endTime = new Date("{{ end_time|escapejs }}").getTime();
-    if (endTime && timerElement) {
+        // Attach listeners (they only count after exam actually started)
+    document.addEventListener('fullscreenchange', function () {
+        if (!started) return;  // don't count while still on overlay
+        if (!isInFullscreen()) handleClientViolation();
+    });
+
+    document.addEventListener('visibilitychange', function () {
+        if (!started) return;
+        if (document.hidden) handleClientViolation();
+    });
+
+    window.addEventListener('blur', function () {
+        if (!started) return;
+        // 👇 ANY blur (including Alt+Tab, switching window, etc.) is a violation
+        handleClientViolation();
+    });
+
+
+    // Start button: requires fullscreen and only then starts heartbeat/timer
+    if (startFSBtn) {
+        startFSBtn.addEventListener('click', function () {
+            tryRequestFullscreen().then(() => {
+                // small delay to let browser settle
+                setTimeout(() => startHeartbeatAndTimer(), 300);
+            }).catch(() => {
+                // fullscreen blocked: inform user and keep overlay visible
+                alert('Fullscreen could not be entered. Please allow fullscreen or try clicking the button again. Fullscreen is required to start/continue this assessment.');
+            });
+        });
+    }
+
+    // End assessment handler: clear local overlay state
+    if (endAssessmentBtn) {
+        endAssessmentBtn.addEventListener('click', function () {
+            clearAssessmentState();
+        });
+    }
+
+    // Timer implementation (only starts when startHeartbeatAndTimer is invoked)
+    const initialEndTime = new Date("{{ end_time|escapejs }}").getTime();
+    function runTimer() {
         const timerInterval = setInterval(() => {
-            const now = new Date().getTime();
-            let timeLeft = Math.floor((endTime - now) / 1000);
-            
+            const now = Date.now();
+            let timeLeft = Math.floor((initialEndTime - now) / 1000);
             if (timeLeft <= 0) {
                 clearInterval(timerInterval);
                 clearAssessmentState();
@@ -132,14 +375,52 @@ document.addEventListener("DOMContentLoaded", function () {
                 window.location.href = "{% url 'assessment_result' assessment.id %}";
                 return;
             }
-
             const hours = Math.floor(timeLeft / 3600);
             const minutes = Math.floor((timeLeft % 3600) / 60);
             const seconds = timeLeft % 60;
-            timerElement.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            if (timerElement) {
+                timerElement.textContent =
+                    `${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`;
+            }
         }, 1000);
     }
+
+    // Ensure the timer runs when the assessment is started
+    const originalStart = startHeartbeatAndTimer;
+    startHeartbeatAndTimer = function() {
+        originalStart();
+        if (!isNaN(initialEndTime) && timerElement) runTimer();
+    };
+
+    // On page load: if focus_mode disabled start immediately; else show overlay
+    const FOCUS_MODE_ENABLED = {{ focus_mode|yesno:"true,false" }};
+    if (!FOCUS_MODE_ENABLED) {
+        startHeartbeatAndTimer();
+    } else {
+        // show overlay on initial load; this will initialize sessionStorage warning to 0
+        showOverlay(
+            'Please enter fullscreen to start. This ensures a fair testing environment. You have one warning; on the second violation the assessment will be submitted automatically.'
+        );
+    }
+
+    // ✅ Treat quiz/code submits as safe navigations
+    const assessmentContainer = document.getElementById('assessment-container');
+    if (assessmentContainer) {
+        assessmentContainer.querySelectorAll('form').forEach(form => {
+            form.addEventListener('submit', () => {
+                sessionStorage.setItem('isUnloading', 'true');
+            });
+        });
+    }
+
+    // beforeunload marker for your existing logic
+    window.addEventListener('beforeunload', function () {
+        sessionStorage.setItem('isUnloading', 'true');
+    });
+    sessionStorage.removeItem('isUnloading');
+
+    // reflect saved warning count in UI
+    updateWarningDisplay(parseInt(sessionStorage.getItem(warningStorageKey) || '0'));
 });
 </script>
-{% block assessment_extra_js %}{% endblock %}
 {% endblock %}

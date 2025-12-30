@@ -23,4 +23,4 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "celery -A codingp
 
 # --- 3. Start the Django Server in the current window ---
 echo "Starting Django development server..."
-python manage.py runserver
+python run_production.py

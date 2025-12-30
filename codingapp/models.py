@@ -141,13 +141,19 @@ class Module(models.Model):
     title = models.CharField(max_length=255, unique=True)
     slug = models.SlugField(unique=True, blank=True)
     description = models.TextField(blank=True, null=True)
-<<<<<<< HEAD
-    # ⭐ ADD THESE TWO FIELDS
-    is_public = models.BooleanField(default=False, help_text="If checked, this module is visible to all students.")
-    groups = models.ManyToManyField(Group, blank=True, help_text="Assign this module to specific groups. Ignored if 'Is Public' is checked.")
-=======
-    groups = models.ManyToManyField(Group, related_name='modules', blank=True)
->>>>>>> b980e73c86f546779e855c649cbd39afa579f86c
+
+    # PUBLIC / GROUP ACCESS
+    is_public = models.BooleanField(
+        default=False,
+        help_text="If checked, this module is visible to all students."
+    )
+
+    groups = models.ManyToManyField(
+        Group,
+        related_name="modules",
+        blank=True,
+        help_text="Assign this module to groups. Ignored if Is Public is enabled."
+    )
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -156,9 +162,6 @@ class Module(models.Model):
 
     def __str__(self):
         return self.title
-
-    class Meta:
-        ordering = ['title']
 
 
 class Question(models.Model):
@@ -253,8 +256,21 @@ class AssessmentSubmission(models.Model):
     language = models.CharField(max_length=30)
     submitted_at = models.DateTimeField(auto_now_add=True)
     score = models.IntegerField(default=0)
+    plagiarism_percent = models.FloatField(default=0.0)
     output = models.TextField(blank=True, null=True)
     error = models.TextField(blank=True, null=True)
+    # Component signals (optional / nullable for backward compatibility)
+    structural_similarity = models.FloatField(null=True, blank=True, help_text="AST/structural similarity (0.0-1.0)")
+    token_similarity = models.FloatField(null=True, blank=True, help_text="Token/winnowing similarity (0.0-1.0)")
+    embedding_similarity = models.FloatField(null=True, blank=True, help_text="Embedding cosine similarity (0.0-1.0)")
+    ai_generated_prob = models.FloatField(null=True, blank=True, help_text="Estimated probability code is AI-generated (0.0-1.0)")
+    # cache / diagnostic
+    fingerprint = models.TextField(null=True, blank=True, help_text="Optional fingerprint or hash for quick comparisons")
+    # inside AssessmentSubmission model
+    raw_score = models.FloatField(null=True, blank=True, help_text="Raw marks before plagiarism penalty (0-5).")
+    # If you want an updated timestamp:
+    updated_at = models.DateTimeField(auto_now=True)
+
 
     class Meta:
         unique_together = ['assessment', 'question', 'user']
@@ -263,6 +279,7 @@ class AssessmentSubmission(models.Model):
         return f"{self.user.username} - {self.assessment.title} - {self.question.title}"
 
 
+# in codingapp/models.py — modify AssessmentSession
 class AssessmentSession(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     assessment = models.ForeignKey(Assessment, on_delete=models.CASCADE)
@@ -270,8 +287,20 @@ class AssessmentSession(models.Model):
     end_time = models.DateTimeField(null=True, blank=True)
     quiz_submitted = models.BooleanField(default=False)
 
+    # NEW fields for cheat detection / heartbeat
+    warnings_count = models.PositiveIntegerField(default=0)            # number of times fullscreen/visibility was violated
+    last_heartbeat = models.DateTimeField(null=True, blank=True)       # last time we received a heartbeat
+    flagged = models.BooleanField(default=False)                       # set True when auto-end enforced
+    # models.py (AssessmentSession)
+    penalty_percent = models.FloatField(default=0.0)
+    penalty_factor = models.FloatField(default=1.0)
+    raw_total = models.FloatField(null=True, blank=True)
+    penalized_total = models.FloatField(null=True, blank=True)
+    penalty_applied = models.BooleanField(default=False)
+
     class Meta:
         unique_together = ['user', 'assessment']
+
 
 
 # -----------------------------
@@ -658,3 +687,91 @@ def assign_default_permissions_to_roles():
             role.save()
     except (OperationalError, ProgrammingError):
         pass
+
+
+class EmailOTP(models.Model):
+    email = models.EmailField()
+    otp = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_verified = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.email} - {self.otp}"
+
+
+# ================================
+# External Coding Profiles
+# ================================
+
+class ExternalProfile(models.Model):
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="external_profile"
+    )
+
+    # Usernames
+    codeforces_username = models.CharField(
+        max_length=100, blank=True, null=True
+    )
+
+    # Cached stats (JSON)
+    codeforces_stats = models.JSONField(
+        default=dict, blank=True
+    )
+
+    # LeetCode
+    leetcode_username = models.CharField(
+        max_length=100, blank=True, null=True
+    )
+
+    leetcode_stats = models.JSONField(
+        default=dict, blank=True
+    )
+    codechef_username = models.CharField(
+    max_length=100,
+    blank=True,
+    null=True
+    )
+
+    codechef_stats = models.JSONField(
+        default=dict,
+        blank=True
+    )
+    # HackerRank
+    hackerrank_username = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True
+    )
+
+    hackerrank_profile_url = models.URLField(
+        blank=True,
+        null=True
+    )
+
+    hackerrank_verified = models.BooleanField(
+        default=False
+    )
+    hackerrank_stats = models.JSONField(
+        default=dict,
+        blank=True
+    )
+
+
+    # Last synced timestamp
+    last_synced = models.DateTimeField(
+        null=True, blank=True
+    )
+
+    def __str__(self):
+        return f"{self.user.username} - External Profile"
+
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+@receiver(post_save, sender=User)
+def create_external_profile(sender, instance, created, **kwargs):
+    if created:
+        ExternalProfile.objects.create(user=instance)

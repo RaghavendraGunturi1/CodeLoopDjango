@@ -18,15 +18,30 @@ from celery.result import AsyncResult # <-- ADD CELERY IMPORT
 from celery.result import AsyncResult 
 from .tasks import process_practice_submission, process_assessment_submission # (and other tasks)
 from .models import (
-    Question, Submission, Module,
+    Notice, NoticeReadStatus, Question, Submission, Module,
     Assessment, AssessmentQuestion, AssessmentSubmission,
     AssessmentSession
 )
-from .forms import ModuleForm, QuestionForm
+from .forms import ModuleForm, NoticeForm, QuestionForm
 from codingapp import models
 from codingapp.models import Department, Role, ActionPermission, UserProfile
-from codingapp.utils import get_user_accessible_groups
+from codingapp.utils import deny_access_if_not_allowed, get_user_accessible_groups
 from codingapp.utils import is_teacher, is_hod, is_admin, has_role
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse, HttpResponseBadRequest
+from django.utils import timezone
+import difflib  # for plagiarism
+from difflib import SequenceMatcher
+import re
+from django.contrib import messages
+from django.shortcuts import redirect
+def is_teacher_or_admin(user):
+    if not user.is_authenticated:
+        return False
+    role = user.userprofile.role.name.lower()
+    return role in ["teacher", "admin"]
+
 
 
 
@@ -41,6 +56,18 @@ logger = logging.getLogger(__name__)
 
 
 from django.contrib.auth.views import LoginView
+
+def is_request_mobile(request):
+    """
+    Simple server-side mobile detection using User-Agent.
+    This isn't perfect but blocks obvious mobile UAs.
+    """
+    ua = request.META.get('HTTP_USER_AGENT', '') or ''
+    ua = ua.lower()
+    # basic mobile indicators
+    mobile_regex = re.compile(r"android|iphone|ipad|ipod|windows phone|mobile")
+    return bool(mobile_regex.search(ua))
+
 
 class CustomLoginView(LoginView):
     def form_valid(self, form):
@@ -187,21 +214,253 @@ from django.contrib.auth import login
 from .forms import RegistrationForm
 from .models import UserProfile
 
+from django.contrib.auth.models import User
+from codingapp.forms import StudentRegistrationForm
+from codingapp.models import UserProfile
+
+from codingapp.models import Role, UserProfile
+from django.shortcuts import render, redirect
+from django.contrib.auth.models import User
+from codingapp.models import UserProfile, Role
+
+from django.shortcuts import render, redirect
+from .forms import StudentRegistrationForm
+from .utils import generate_otp, send_otp_email
+from .models import EmailOTP
+from django.core.mail import send_mail
+
+import random
+from django.core.mail import send_mail
+
+# codingapp/views.py
+
+import random
+from django.core.mail import send_mail
+from django.conf import settings
+from django.shortcuts import render, redirect
+from .forms import RegistrationForm
+
 def register(request):
     if request.method == "POST":
-        form = RegistrationForm(request.POST, request.FILES)
+        form = RegistrationForm(request.POST)
+
         if form.is_valid():
-            user = form.save()
+            otp = random.randint(100000, 999999)
 
-            # FIX: Don't use user.profile → use get_or_create
-            profile, _ = UserProfile.objects.get_or_create(user=user)
-            profile.save()
+            # ⚠️ Store ONLY SERIALIZABLE DATA
+            request.session["reg_data"] = {
+                "username": form.cleaned_data["username_input"],
+                "email": form.cleaned_data["email"],
+                "password": form.cleaned_data["password1"],
+                "role": form.cleaned_data["role"],
+                "department_id": form.cleaned_data["department"].id,
+                "group_id": form.cleaned_data["group"].id if form.cleaned_data["group"] else None,
+                "otp": str(otp),
+            }
 
-            login(request, user)
-            return redirect("dashboard")
+            send_mail(
+                subject="CodeLoop OTP Verification",
+                message=f"Your OTP is {otp}",
+                from_email=settings.EMAIL_HOST_USER,
+                recipient_list=[form.cleaned_data["email"]],
+                fail_silently=False,
+            )
+
+            return redirect("verify_otp")
     else:
         form = RegistrationForm()
+
     return render(request, "registration/register.html", {"form": form})
+
+
+
+
+def teacher_register(request):
+    if request.method == "POST":
+        form = TeacherRegistrationForm(request.POST)
+
+        if form.is_valid():
+            email = form.cleaned_data["email"]
+            username = form.cleaned_data["username"]
+
+            if User.objects.filter(username=username).exists():
+                form.add_error("username", "Username already exists.")
+                return render(request, "registration/teacher_register.html", {"form": form})
+
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=form.cleaned_data["password1"]
+            )
+
+            teacher_role, _ = Role.objects.get_or_create(name="teacher")
+
+            UserProfile.objects.get_or_create(
+                user=user,
+                defaults={
+                    "role": teacher_role,
+                    "department": form.cleaned_data["department"]
+                }
+            )
+
+            return redirect("login")
+
+    else:
+        form = TeacherRegistrationForm()
+
+    return render(request, "registration/teacher_register.html", {"form": form})
+
+
+from django.contrib.auth.models import User
+from .models import Role, UserProfile, Group, Department
+
+from django.contrib.auth.models import User
+from codingapp.models import UserProfile, Role, Department, Group
+
+from django.contrib.auth.models import User
+from .models import Role, UserProfile, Group, Department
+
+from django.contrib.auth.models import User
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.db import transaction
+from .models import UserProfile, Role, Group, Department
+
+def verify_otp(request):
+    if request.method == "POST":
+        entered_otp = request.POST.get("otp")
+        reg_data = request.session.get("reg_data")
+
+        if not reg_data:
+            messages.error(request, "Session expired. Please register again.")
+            return redirect("register")
+
+        if entered_otp != reg_data.get("otp"):
+            messages.error(request, "Invalid OTP")
+            return render(request, "registration/verify_otp.html")
+
+        # ✅ OTP VERIFIED — CREATE ACCOUNT SAFELY
+        try:
+            with transaction.atomic():
+
+                # 1️⃣ Create User
+                user, created = User.objects.get_or_create(
+                    username=reg_data["username"],
+                    defaults={
+                        "email": reg_data["email"],
+                    }
+                )
+
+                if not created:
+                    messages.error(request, "User already exists.")
+                    return redirect("register")
+
+                user.set_password(reg_data["password"])
+                user.save()
+
+                # 2️⃣ Fetch Role instance
+                role = Role.objects.get(name__iexact=reg_data["role"])
+
+                department = Department.objects.get(id=reg_data["department_id"])
+
+                # 3️⃣ Create UserProfile SAFELY
+                profile, _ = UserProfile.objects.get_or_create(
+                    user=user,
+                    defaults={
+                        "role": role,
+                        "department": department,
+                    }
+                )
+
+                # 4️⃣ Assign group ONLY for students
+                if reg_data.get("group_id"):
+                    group = Group.objects.get(id=reg_data["group_id"])
+                    group.students.add(user)
+
+                # 5️⃣ Cleanup session
+                del request.session["reg_data"]
+
+                messages.success(request, "Account verified and created successfully.")
+                return redirect("login")
+
+        except Exception as e:
+            messages.error(request, f"Registration failed: {str(e)}")
+            return redirect("register")
+
+    return render(request, "registration/verify_otp.html")
+
+
+import random
+from django.core.mail import send_mail
+from django.contrib import messages
+from django.contrib.auth.models import User
+from django.shortcuts import render, redirect
+from .forms import ForgotPasswordForm, ResetPasswordForm
+
+def forgot_password(request):
+    if request.method == "POST":
+        form = ForgotPasswordForm(request.POST)
+        if form.is_valid():
+            email = form.cleaned_data["email"]
+
+            try:
+                user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                messages.error(request, "No account found with this email.")
+                return redirect("forgot_password")
+
+            otp = str(random.randint(100000, 999999))
+
+            request.session["fp_otp"] = otp
+            request.session["fp_user_id"] = user.id
+
+            send_mail(
+                subject="Password Reset OTP - CodeLoop",
+                message=f"Your OTP for password reset is: {otp}",
+                from_email=None,
+                recipient_list=[email],
+            )
+
+            messages.success(request, "OTP sent to your email.")
+            return redirect("reset_password")
+
+    else:
+        form = ForgotPasswordForm()
+
+    return render(request, "registration/forgot_password.html", {"form": form})
+
+def reset_password(request):
+    if request.method == "POST":
+        form = ResetPasswordForm(request.POST)
+        if form.is_valid():
+            otp_entered = form.cleaned_data["otp"]
+            session_otp = request.session.get("fp_otp")
+            user_id = request.session.get("fp_user_id")
+
+            if not session_otp or not user_id:
+                messages.error(request, "Session expired.")
+                return redirect("forgot_password")
+
+            if otp_entered != session_otp:
+                messages.error(request, "Invalid OTP.")
+                return redirect("reset_password")
+
+            user = User.objects.get(id=user_id)
+            user.set_password(form.cleaned_data["new_password"])
+            user.save()
+
+            # Cleanup
+            del request.session["fp_otp"]
+            del request.session["fp_user_id"]
+
+            messages.success(request, "Password reset successful. Please login.")
+            return redirect("login")
+
+    else:
+        form = ResetPasswordForm()
+
+    return render(request, "registration/reset_password.html", {"form": form})
+
 
 
 from django.contrib.auth.decorators import login_required
@@ -212,58 +471,24 @@ from .forms import ModuleForm, QuestionForm
 
 @login_required
 def module_list(request):
-<<<<<<< HEAD
-    if request.user.is_staff:
-        # Staff members can see all modules
-        modules = Module.objects.all().order_by('title')
-    else:
-        # Students see modules that are public OR assigned to any of their groups
-        user_groups = request.user.custom_groups.all()
-        modules = Module.objects.filter(
-            Q(is_public=True) | Q(groups__in=user_groups)
-        ).distinct().order_by('title')
-
-    # Get the set of module IDs that the user has completed
-    completed_modules = set(
-        ModuleCompletion.objects.filter(
-            user=request.user, module__in=modules
-        ).values_list('module_id', flat=True)
-    )
-    
-    context = {
-        'modules': modules,
-        'completed_modules': completed_modules,
-    }
-    return render(request, 'codingapp/module_list.html', context)
-=======
     accessible_groups = get_user_accessible_groups(request.user)
     mods = Module.objects.filter(groups__in=accessible_groups).distinct()
     return render(request, 'codingapp/module_list.html', {'modules': mods})
->>>>>>> b980e73c86f546779e855c649cbd39afa579f86c
 
 
-from .models import ModuleCompletion # Make sure this is imported at the top
+from .models import ModuleCompletion  # make sure this is imported
 
 @login_required
 def module_detail(request, module_id):
     module = get_object_or_404(Module, id=module_id)
-<<<<<<< HEAD
-
-    # ⭐ UPDATED PERMISSION CHECK
-=======
     denied = deny_access_if_not_allowed(request, module)
     if denied: 
         return denied
->>>>>>> b980e73c86f546779e855c649cbd39afa579f86c
     if not request.user.is_staff:
         user_groups = request.user.custom_groups.all()
-        # A student can access if the module is public OR if they are in an assigned group.
-        is_assigned_to_group = module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists()
-        
-        if not module.is_public and not is_assigned_to_group:
+        if not module.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
-    # The rest of your logic is correct and remains the same
     questions = module.questions.all()
     total_count = questions.count()
 
@@ -273,6 +498,7 @@ def module_detail(request, module_id):
         status="Accepted"
     ).values("question").distinct().count()
 
+    # ✅ Check if already marked as completed
     is_completed = ModuleCompletion.objects.filter(
         user=request.user,
         module=module
@@ -282,59 +508,62 @@ def module_detail(request, module_id):
         "module": module,
         "total_count": total_count,
         "completed_count": completed_count,
-        "is_completed": is_completed,
+        "is_completed": is_completed,  # ✅ Add to context
     })
 
 
 @user_passes_test(is_teacher, login_url='/dashboard/')
 def add_module(request):
-<<<<<<< HEAD
     if request.method == 'POST':
         form = ModuleForm(request.POST)
         if form.is_valid():
-            # ⭐ FIX Step 1: Save the form with commit=False to create an object in memory
-            module = form.save(commit=False)
-            
-            # (If you needed to add other data, like author, you'd do it here)
-            # module.created_by = request.user
-            
-            # ⭐ FIX Step 2: Save the main object to the database. It now has an ID.
-            module.save()
-            
-            # ⭐ FIX Step 3: Now, explicitly save the many-to-many data (the groups).
-            form.save_m2m()
-            
+            module = form.save()  # save module + groups correctly
             messages.success(request, "Module created successfully!")
             return redirect("module_list")
+        else:
+            messages.error(request, "Please correct the errors below.")
     else:
         form = ModuleForm()
-        
-    return render(request, "codingapp/module_form.html", {"form": form, "action": "Add"})
-=======
-    form = ModuleForm(request.POST or None)
-    if not request.user.is_staff:
-        form.fields['groups'].queryset = request.user.custom_groups.all()
-    else:
-        form.fields['groups'].queryset = Group.objects.all()
-    if form.is_valid():
-        form.save()
-        return redirect("module_list")
-    return render(request, "codingapp/module_form.html", {"form": form})
->>>>>>> b980e73c86f546779e855c649cbd39afa579f86c
+
+    return render(request, "codingapp/module_form.html", {
+        "form": form,
+        "action": "Add",
+    })
+
 
 @user_passes_test(is_teacher, login_url='/dashboard/')
 def edit_module(request, module_id):
-    mod = get_object_or_404(Module, id=module_id)
+    print("### USING edit_module VIEW ###")
+
+    module = get_object_or_404(Module, id=module_id)
+
     if request.method == 'POST':
-        form = ModuleForm(request.POST, instance=mod)
+        print("\n===== DEBUG: EDIT MODULE POST RECEIVED =====")
+        print("POST DATA:", request.POST)
+
+        form = ModuleForm(request.POST, instance=module)
+
+        print("Form is_valid():", form.is_valid())
+        print("Form.errors:", form.errors)
+        print("Non field errors:", form.non_field_errors())
+
         if form.is_valid():
-            form.save() # On an existing object, this is usually sufficient, but being explicit is better.
+            saved = form.save()
+            print("MODULE SAVED:", saved)
             messages.success(request, "Module updated successfully!")
             return redirect("module_list")
+        else:
+            print("DEBUG: Form did NOT validate.")
+
     else:
-        form = ModuleForm(instance=mod)
-        
-    return render(request, "codingapp/module_form.html", {"form": form, "action": "Edit"})
+        form = ModuleForm(instance=module)
+
+    return render(request, "codingapp/module_form.html", {
+        "form": form,
+        "action": "Edit",
+    })
+
+
 
 @user_passes_test(is_teacher, login_url='/dashboard/')
 def delete_module(request, module_id):
@@ -611,6 +840,10 @@ def assessment_detail(request, assessment_id):
     if not assessment.is_active():
         messages.warning(request, "This assessment is not active.")
         return redirect("assessment_list")
+        # block mobile devices from starting the assessment (server-side)
+    if is_request_mobile(request):
+        messages.error(request, "Assessments cannot be taken on mobile devices. Please use a desktop or laptop.")
+        return redirect('assessment_list')   # or 'assessment_detail' based on UX
 
     # Get or create the session
     session, created = AssessmentSession.objects.get_or_create(
@@ -718,8 +951,43 @@ def assessment_leaderboard_list(request):
     }
     return render(request, 'codingapp/assessment_leaderboard_list.html', context)
 
+# In codingapp/views.py
+
+# at top of file (if not already)
+from django.db.models import Sum, Max, F
+from django.contrib.auth.models import User
+from .models import Assessment, AssessmentSubmission, AssessmentSession, QuizSubmission
+
+from django.db.models import Sum, Max
+
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import get_object_or_404, render
+from django.db.models import Sum, Max
+from django.contrib.auth import get_user_model
+
+from .models import (
+    Assessment, AssessmentQuestion, AssessmentSubmission, AssessmentSession,
+    QuizSubmission
+)
+from .utils import penalty_factor_from_plagiarism  # make sure this exists
+
+User = get_user_model()
+
 @login_required
 def assessment_leaderboard(request, assessment_id):
+    from django.db.models import Sum, Max
+    import json
+    from django.shortcuts import get_object_or_404, render
+    from django.contrib.auth import get_user_model
+
+    # local model imports to avoid top-level import issues
+    from codingapp.models import (
+        Assessment, AssessmentQuestion, AssessmentSubmission,
+        AssessmentSession, QuizSubmission
+    )
+
+    User = get_user_model()
+
     assessment = get_object_or_404(Assessment, id=assessment_id)
 
     # Permission Check
@@ -728,83 +996,321 @@ def assessment_leaderboard(request, assessment_id):
         if not assessment.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
-    # Get all users who are assigned to the assessment's groups
-    participant_ids = assessment.groups.prefetch_related('students').values_list('students', flat=True).distinct()
-    participants = User.objects.filter(id__in=participant_ids)
+    # =========================================================
+    # 1. CHANGED: Participants (Filtered strictly by Assigned Group)
+    # =========================================================
+    # This ensures we ONLY get students (not staff) who belong to 
+    # the groups specifically assigned to this assessment.
+    participants = User.objects.filter(
+        custom_groups__in=assessment.groups.all(),
+        is_staff=False
+    ).distinct()
+    # =========================================================
 
-    # Get all coding scores for this assessment, summed up per user
-    coding_scores = AssessmentSubmission.objects.filter(
-        assessment=assessment
-    ).values('user__id').annotate(total_coding_score=Sum('score'))
-    
-    # Create a dictionary for fast lookup: {user_id: coding_score}
-    coding_scores_dict = {item['user__id']: item['total_coding_score'] for item in coding_scores}
+    # 2. Questions order
+    assessment_questions = (
+        AssessmentQuestion.objects
+        .filter(assessment=assessment)
+        .select_related('question')
+        .order_by('order')
+    )
+    questions_list = [aq.question for aq in assessment_questions]
 
-    # Get all quiz scores if the assessment has a quiz
+    # 3. All submissions for this assessment (select related for fewer queries)
+    all_submissions = AssessmentSubmission.objects.filter(assessment=assessment).select_related('question', 'user')
+
+    # helper: normalize status strings that indicate a passed test
+    def _is_accepted_status(s):
+        if not s:
+            return False
+        s = str(s).strip().lower()
+        return s in ("accepted", "ok", "passed", "success", "true")
+
+    # Precompute question test counts where available
+    question_testcounts = {}
+    for q in questions_list:
+        try:
+            question_testcounts[q.id] = len(q.test_cases or [])
+        except Exception:
+            question_testcounts[q.id] = None
+
+    # Build maps of latest submission per user-question (we'll iterate in time order so later submissions overwrite)
+    user_question_scores = {}  # penalized scores stored in DB (sub.score)
+    user_question_raw = {}     # raw marks inferred or stored (0..5)
+    user_question_extra = {}   # for ai/token/struct similarity per submission (latest)
+
+    # iterate submissions in time order (older -> newer) so later ones overwrite
+    for sub in all_submissions.order_by('submitted_at'):
+        uid = sub.user_id
+        qid = sub.question_id
+
+        # penalized score as stored
+        try:
+            penalized_val = float(sub.score or 0)
+        except Exception:
+            penalized_val = 0.0
+        user_question_scores.setdefault(uid, {})[qid] = penalized_val
+
+        # prefer explicit raw_score if present
+        raw_val = getattr(sub, "raw_score", None)
+        if raw_val is not None:
+            try:
+                raw_numeric = float(raw_val or 0.0)
+            except Exception:
+                raw_numeric = 0.0
+            user_question_raw.setdefault(uid, {})[qid] = raw_numeric
+        else:
+            # try to infer from output JSON/list/dict
+            inferred_raw = 0.0
+            outputs = []
+            try:
+                out_field = sub.output
+                if isinstance(out_field, str):
+                    # try safe json first
+                    try:
+                        parsed = json.loads(out_field)
+                        if isinstance(parsed, list):
+                            outputs = parsed
+                        elif isinstance(parsed, dict):
+                            outputs = [parsed]
+                        else:
+                            outputs = []
+                    except Exception:
+                        # not valid json -> keep empty list (fallback to score)
+                        outputs = []
+                elif isinstance(out_field, list):
+                    outputs = out_field
+                elif isinstance(out_field, dict):
+                    outputs = [out_field]
+                else:
+                    outputs = []
+            except Exception:
+                outputs = []
+
+            # Count passed testcases
+            passed = 0
+            for r in outputs:
+                try:
+                    # Accept either 'status' or 'result' etc.
+                    if isinstance(r, dict):
+                        st = r.get("status") or r.get("result") or r.get("outcome")
+                    else:
+                        st = None
+                    if _is_accepted_status(st):
+                        passed += 1
+                except Exception:
+                    continue
+
+            total_tests = question_testcounts.get(qid)
+            if total_tests is None or total_tests == 0:
+                total_tests = len(outputs) or 1
+
+            # policy: full 5 only if all passed; else 0 (you can switch to proportional easily)
+            if total_tests > 0 and passed == total_tests:
+                inferred_raw = 5.0
+            else:
+                inferred_raw = 0.0
+
+            user_question_raw.setdefault(uid, {})[qid] = float(inferred_raw)
+
+        # store extra similarity metrics if present on submission (latest overwrite)
+        user_question_extra.setdefault(uid, {})[qid] = {
+            'token_similarity': float(getattr(sub, 'token_similarity', 0.0) or 0.0),
+            'structural_similarity': float(getattr(sub, 'structural_similarity', 0.0) or 0.0),
+            'ai_generated_prob': float(getattr(sub, 'ai_generated_prob', 0.0) or 0.0),
+            'plagiarism_percent': float(getattr(sub, 'plagiarism_percent', 0.0) or 0.0),
+        }
+
+    # 4. Total (penalized) coding scores aggregated
+    coding_scores_agg = (
+        all_submissions
+        .values('user__id')
+        .annotate(total_coding_score=Sum('score'))
+    )
+    coding_scores_dict = { item['user__id']: float(item['total_coding_score'] or 0.0) for item in coding_scores_agg }
+
+    # 5. Max plagiarism percent per user (DB aggregate)
+    plag_agg = (
+        all_submissions
+        .values('user__id')
+        .annotate(max_plag=Max('plagiarism_percent'))
+    )
+    plagiarism_dict = { item['user__id']: float(item['max_plag'] or 0.0) for item in plag_agg }
+
+    # 6. Quiz scores (best per user)
     quiz_scores_dict = {}
-    if assessment.quiz:
-        quiz_scores = QuizSubmission.objects.filter(
-            quiz=assessment.quiz
-        ).values('user__id', 'score')
-        quiz_scores_dict = {item['user__id']: item['score'] for item in quiz_scores}
-    
-    # NEW: Fetch assessment sessions for time calculation
+    if getattr(assessment, "quiz", None):
+        # try to gather quiz submissions; be defensive about model shape
+        try:
+            quiz_subs = QuizSubmission.objects.filter(quiz=assessment.quiz).values('user__id', 'score')
+            for item in quiz_subs:
+                uid = item['user__id']
+                sc = float(item['score'] or 0.0)
+                quiz_scores_dict[uid] = max(quiz_scores_dict.get(uid, 0.0), sc)
+        except Exception:
+            # if QuizSubmission not present or relation differs, skip quietly
+            quiz_scores_dict = {}
+
+    # 7. Sessions & time taken
     sessions = AssessmentSession.objects.filter(
-        assessment=assessment, user__in=participants, end_time__isnull=False
+        assessment=assessment,
+        user__in=participants,
+        end_time__isnull=False,
     ).select_related('user')
-    
+
     session_times_dict = {}
     for session in sessions:
-        if session.end_time and session.start_time:
-            # Calculate duration (timedelta)
+        if session.start_time and session.end_time:
             duration = session.end_time - session.start_time
-            # Format duration into human-readable string
             total_seconds = int(duration.total_seconds())
             hours = total_seconds // 3600
             minutes = (total_seconds % 3600) // 60
             seconds = total_seconds % 60
             time_str = f"{hours}h {minutes}m {seconds}s"
-            # Use total seconds as a sort key
-            session_times_dict[session.user_id] = {'duration': duration, 'time_str': time_str, 'sort_key': total_seconds}
+            session_times_dict[session.user_id] = {
+                'time_str': time_str,
+                'sort_key': total_seconds,
+                'session': session
+            }
         else:
-             session_times_dict[session.user_id] = {'duration': None, 'time_str': "N/A", 'sort_key': float('inf')}
+            session_times_dict[session.user_id] = {
+                'time_str': "N/A",
+                'sort_key': float('inf'),
+                'session': session
+            }
 
-
-    # Combine the scores and times for every participant
+    # 8. Build leaderboard rows
     leaderboard_data = []
     for user in participants:
-        quiz_score = quiz_scores_dict.get(user.id, 0)
-        coding_score = coding_scores_dict.get(user.id, 0)
-        total_score = quiz_score + coding_score
-        
-        time_info = session_times_dict.get(user.id, {'duration': None, 'time_str': "N/A", 'sort_key': float('inf')})
-        
-        # Only include users who have scored something or have an attempted time
-        if total_score > 0 or time_info['duration'] is not None:
-             leaderboard_data.append({
-                'username': user.username,
-                'quiz_score': quiz_score,
-                'coding_score': coding_score,
-                'total_score': total_score,
-                'time_taken_str': time_info['time_str'],
-                'time_taken_seconds': time_info['sort_key'],
-             })
+        uid = user.id
+        question_pairs = []
+        # Build per-question pairs
+        for q in questions_list:
+            penalized_val = float(user_question_scores.get(uid, {}).get(q.id, 0.0) or 0.0)
+            raw_val = float(user_question_raw.get(uid, {}).get(q.id, 0.0) or 0.0)
+            question_pairs.append({
+                'penalized': penalized_val,
+                'raw': raw_val,
+            })
 
-    # Sort the final list by total score (desc) then time taken (asc)
-    leaderboard_data.sort(key=lambda x: (-x['total_score'], x['time_taken_seconds']))
+        total_coding = float(coding_scores_dict.get(uid, 0.0) or 0.0)
+        total_coding_raw = float(sum(item['raw'] for item in question_pairs) or 0.0)
+        quiz_score = float(quiz_scores_dict.get(uid, 0.0) or 0.0)
+        max_plag = round(plagiarism_dict.get(uid, 0.0), 2)
+        raw_total = round(quiz_score + total_coding_raw, 2)
 
+        # Compute per-user maxes for similarity metrics across questions (latest per-sub overwrites)
+        max_token = 0.0
+        max_struct = 0.0
+        max_ai = 0.0
+        for q in questions_list:
+            extra = user_question_extra.get(uid, {}).get(q.id, {})
+            max_token = max(max_token, float(extra.get('token_similarity', 0.0) or 0.0))
+            max_struct = max(max_struct, float(extra.get('structural_similarity', 0.0) or 0.0))
+            max_ai = max(max_ai, float(extra.get('ai_generated_prob', 0.0) or 0.0))
+
+        # Session-level penalty fields if stored
+        session = session_times_dict.get(uid, {}).get('session')
+        if session is not None and hasattr(session, "penalized_total") and session.penalized_total is not None:
+            try:
+                penalized_total = float(session.penalized_total)
+            except Exception:
+                penalized_total = raw_total
+            penalty_factor = float(getattr(session, "penalty_factor", 1.0) or 1.0)
+            penalty_applied = bool(getattr(session, "penalty_applied", penalty_factor < 1.0))
+        else:
+            # compute on-the-fly from max_plag
+            from codingapp.utils import penalty_factor_from_plagiarism
+            try:
+                penalty_factor = penalty_factor_from_plagiarism(max_plag)
+            except Exception:
+                if max_plag <= 35.0:
+                    penalty_factor = 1.0
+                elif max_plag >= 85.0:
+                    penalty_factor = 0.0
+                else:
+                    penalty_factor = round((85.0 - max_plag) / (85.0 - 35.0), 4)
+            penalized_total = round(raw_total * penalty_factor, 2)
+            penalty_applied = (penalty_factor < 1.0)
+
+        total_score_display = penalized_total
+
+        leaderboard_data.append({
+            'user_id': uid,
+            'username': user.get_full_name() or user.username,
+            'question_pairs': question_pairs,
+            'total_coding_score': total_coding,
+            'total_coding_raw': total_coding_raw,
+            'quiz_score': quiz_score,
+            'raw_total': raw_total,
+            'penalized_total': penalized_total,
+            'penalty_factor': penalty_factor,
+            'penalty_applied': penalty_applied,
+            'total_score': total_score_display,
+            'time_taken_str': session_times_dict.get(uid, {'time_str': "N/A"})['time_str'],
+            'time_taken_seconds': session_times_dict.get(uid, {'sort_key': float('inf')})['sort_key'],
+            'max_plagiarism': max_plag,
+            # Convert similarity decimals into percentages for display (keep a few decimals)
+            'token_similarity': round(max_token * 100.0, 4),
+            'structural_similarity': round(max_struct * 100.0, 4),
+            'ai_generated_prob': round(max_ai * 100.0, 4),
+        })
+
+    # 9. Sort leaderboard
+    leaderboard_data.sort(key=lambda row: (-row['total_score'], row['time_taken_seconds']))
 
     context = {
-        "assessment": assessment,
-        "leaderboard": leaderboard_data
+        'assessment': assessment,
+        'questions': questions_list,
+        'leaderboard': leaderboard_data,
     }
-    return render(request, "codingapp/assessment_leaderboard.html", context)
+    return render(request, 'codingapp/assessment_leaderboard.html', context) 
+
 
 
 from django.contrib import messages
-from django.shortcuts import render, get_object_or_404, redirect
+
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse, HttpResponseBadRequest
 from django.utils import timezone
-from django.contrib.auth.decorators import login_required
+
+@csrf_exempt
+@require_POST
+@login_required
+def assessment_heartbeat(request, assessment_id):
+    try:
+        data = json.loads(request.body.decode('utf-8') or "{}")
+    except Exception:
+        return HttpResponseBadRequest("Invalid JSON")
+
+    in_fullscreen = data.get("in_fullscreen")
+    if in_fullscreen is None:
+        return HttpResponseBadRequest("Missing 'in_fullscreen' field")
+
+    try:
+        session = AssessmentSession.objects.get(user=request.user, assessment_id=assessment_id)
+    except AssessmentSession.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Session not found"}, status=404)
+
+    session.last_heartbeat = timezone.now()
+
+    # Only increment warnings if client reports not in fullscreen
+    if not bool(in_fullscreen):
+        # increment (ensure warnings_count default is numeric)
+        session.warnings_count = (session.warnings_count or 0) + 1
+        if session.warnings_count > 1:
+            session.flagged = True
+            if not session.end_time:
+                session.end_time = timezone.now()
+    session.save()
+
+    return JsonResponse({
+        "ok": True,
+        "warnings_count": session.warnings_count,
+        "flagged": session.flagged
+    })
+
 
 @login_required
 def submit_assessment_code(request, assessment_id, question_id):
@@ -813,11 +1319,13 @@ def submit_assessment_code(request, assessment_id, question_id):
     import json
     from django.conf import settings
     from django.db.models import Max
+    from django.http import JsonResponse  # already imported above for heartbeat, but safe
 
     assessment = get_object_or_404(Assessment, id=assessment_id)
     denied = deny_access_if_not_allowed(request, assessment)
     if denied:
         return denied
+
     current_question_obj = get_object_or_404(Question, id=question_id)
 
     # ✅ Permission check (unchanged)
@@ -826,9 +1334,35 @@ def submit_assessment_code(request, assessment_id, question_id):
         if not assessment.groups.filter(id__in=user_groups.values_list('id', flat=True)).exists():
             return render(request, "codingapp/permission_denied.html", status=403)
 
+    # Server-side mobile prevention (defense-in-depth)
+    if is_request_mobile(request):
+        # For AJAX, return JSON; for normal, redirect
+        if request.headers.get("x-requested-with") == "XMLHttpRequest":
+            return JsonResponse(
+                {"ok": False, "error": "Coding assessments are not allowed on mobile devices. Use a desktop/laptop."},
+                status=400,
+            )
+        messages.error(request, "Coding assessments are not allowed on mobile devices. Please use a desktop or laptop.")
+        return redirect('assessment_detail', assessment_id=assessment.id)
+
     session = get_object_or_404(AssessmentSession, user=request.user, assessment=assessment)
 
+    # Immediately block interaction if the session was flagged by server-side heartbeat
+    if session.flagged:
+        if request.headers.get("x-requested-with") == "XMLHttpRequest":
+            return JsonResponse(
+                {"ok": False, "error": "Your assessment has been ended due to focus violations."},
+                status=400,
+            )
+        messages.error(request, "Your assessment has been ended due to focus violations.")
+        return redirect('assessment_result', assessment_id=assessment.id)
+
     if assessment.quiz and not session.quiz_submitted:
+        if request.headers.get("x-requested-with") == "XMLHttpRequest":
+            return JsonResponse(
+                {"ok": False, "error": "You must complete the quiz section before accessing coding questions."},
+                status=400,
+            )
         messages.error(request, "You must complete the quiz section before accessing coding questions.")
         return redirect('assessment_detail', assessment_id=assessment.id)
 
@@ -839,85 +1373,104 @@ def submit_assessment_code(request, assessment_id, question_id):
     # ===============================
     # Multi-language setup
     # ===============================
-    # Determine selected language (POST wins, else session fallback)
     if request.method == "POST":
         selected_lang = request.POST.get("language", "python")
     else:
-        selected_lang = request.session.get(
-            f'assessment_lang_{assessment_id}_{question_id}',
-            'python'
+        selected_lang = request.GET.get(
+            "language",
+            request.session.get(
+                f'assessment_lang_{assessment_id}_{question_id}',
+                'python'
+            )
         )
 
-    # Define per-language session keys
+    # Per-language session keys (used for restoring code per language)
     session_code_key = f'assessment_code_{assessment_id}_{question_id}_{selected_lang}'
-    session_task_key = f'assessment_task_id_{assessment_id}_{question_id}_{selected_lang}'
 
-    # Load current task/code if available
-    task_id = request.session.get(session_task_key)
+    # For old session-based polling we used a task key; now polling is pure AJAX
     code = request.session.get(session_code_key, '')
-
     submission_results = None
     latest_submission = None
 
+    is_ajax = request.headers.get("x-requested-with") == "XMLHttpRequest"
+
     # ===============================
-    # 1️⃣ Handle POST (submission)
+    # 1️⃣ AJAX POST – create Celery task
     # ===============================
-    if request.method == "POST" and not read_only:
-        code = request.POST.get("code", "").strip()
+    if is_ajax and request.method == "POST":
+        if read_only:
+            return JsonResponse(
+                {"ok": False, "error": "Assessment time is over; you cannot submit more code."},
+                status=400,
+            )
+
+        # We send FormData from JS, so csrf + fields are in request.POST
+        code = (request.POST.get("code") or "").strip()
         lang = request.POST.get("language", "python")
 
         if not code:
-            messages.error(request, "Code cannot be empty.")
-        else:
-            # ⭐ Async submission
-            task = process_assessment_submission.delay(
-                request.user.id, assessment.id, current_question_obj.id, code, lang
+            return JsonResponse({"ok": False, "error": "Code cannot be empty."}, status=400)
+
+        # Fire async task
+        task = process_assessment_submission.delay(
+            request.user.id, assessment.id, current_question_obj.id, code, lang
+        )
+
+        # Remember code + language in session for later page loads
+        request.session[f'assessment_code_{assessment_id}_{question_id}_{lang}'] = code
+        request.session[f'assessment_lang_{assessment_id}_{question_id}'] = lang
+        request.session.modified = True
+
+        return JsonResponse(
+            {
+                "ok": True,
+                "task_id": task.id,
+                "message": "Submission is being processed in the background.",
+            }
+        )
+
+    # ===============================
+    # 2️⃣ AJAX GET – poll Celery for this task_id
+    # ===============================
+    if is_ajax and request.method == "GET":
+        task_id = request.GET.get("task_id")
+        if not task_id:
+            return JsonResponse({"ok": False, "error": "Missing task_id"}, status=400)
+
+        result = AsyncResult(task_id)
+
+        # Not ready yet – tell JS to keep polling
+        if not result.ready():
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "completed": False,
+                    "state": result.state,
+                }
             )
 
-            # Store per-language info in session (so switching languages restores quickly)
-            request.session[f'assessment_task_id_{assessment_id}_{question_id}_{lang}'] = task.id
-            request.session[f'assessment_code_{assessment_id}_{question_id}_{lang}'] = code
-            request.session[f'assessment_lang_{assessment_id}_{question_id}'] = lang
-            request.session.modified = True
+        # Ready – unpack Celery result dict
+        data = result.result or {}
+        # In your task you return: final_status, results, error, plagiarism_percent
+        final_status = data.get("final_status") or data.get("status") or "Unknown"
+        results = data.get("results", [])
+        error_msg = data.get("error", "")
+        plagiarism_percent = data.get("plagiarism_percent", 0.0)
 
-            messages.info(request, "Submission is being processed in the background.")
-            return redirect('submit_assessment_code', assessment_id=assessment.id, question_id=question_id)
-
-    # ===============================
-    # 2️⃣ Handle GET (status + results)
-    # ===============================
-    if task_id:
-        task_result = AsyncResult(task_id)
-        if task_result.ready():
-            # remove session task id for this language (task finished)
-            request.session.pop(session_task_key, None)
-            request.session.modified = True
-
-            # Refetch latest submission for this language
-            latest_submission = AssessmentSubmission.objects.filter(
-                assessment=assessment,
-                question=current_question_obj,
-                user=request.user,
-                language=selected_lang
-            ).order_by('-submitted_at').first()
-
-            if latest_submission and latest_submission.output:
-                try:
-                    submission_results = json.loads(latest_submission.output)
-                except json.JSONDecodeError:
-                    submission_results = None
-
-                if latest_submission.score == len(current_question_obj.test_cases):
-                    messages.success(request, "✅ Code Accepted! All test cases passed.")
-                elif latest_submission.error:
-                    messages.error(request, f"❌ Code Execution Error: {latest_submission.error}")
-                else:
-                    messages.warning(request, "⚠️ Some test cases failed.")
-        else:
-            messages.info(request, f"Submission is processing... Status: {task_result.status}")
+        return JsonResponse(
+            {
+                "ok": True,
+                "completed": True,
+                "state": result.state,
+                "final_status": final_status,
+                "results": results,
+                "error": error_msg,
+                "plagiarism_percent": plagiarism_percent,
+            }
+        )
 
     # ===============================
-    # 3️⃣ Load latest code for editor (session-first, then DB filtered by language)
+    # 3️⃣ Normal GET – show last saved result (from DB)
     # ===============================
     if not code:
         latest_submission = AssessmentSubmission.objects.filter(
@@ -933,13 +1486,11 @@ def submit_assessment_code(request, assessment_id, question_id):
                 try:
                     submission_results = json.loads(latest_submission.output)
                 except json.JSONDecodeError:
-                    pass
+                    submission_results = None
 
     # ===============================
-    # 4️⃣ Determine read-only state (robust)
-    #    lock if either deadline passed OR user has full score in ANY language
+    # 4️⃣ Determine read-only state (deadline or full score)
     # ===============================
-    # Get best score across all languages for this user/question
     best_score_agg = AssessmentSubmission.objects.filter(
         assessment=assessment,
         question=current_question_obj,
@@ -947,11 +1498,11 @@ def submit_assessment_code(request, assessment_id, question_id):
     ).aggregate(best=Max('score'))
     best_score = (best_score_agg.get('best') or 0)
 
-    is_fully_solved = (best_score == len(current_question_obj.test_cases))
+    is_fully_solved = (best_score >= 5)
     final_read_only = read_only or is_fully_solved
 
     # ===============================
-    # 5️⃣ Build user_submissions map (DB + session) so language switching restores instantly
+    # 5️⃣ Build user_submissions map (DB + session) for language switching
     # ===============================
     db_codes = {
         s.language: s.code
@@ -980,7 +1531,7 @@ def submit_assessment_code(request, assessment_id, question_id):
         sub = AssessmentSubmission.objects.filter(
             assessment=assessment, question=aq.question, user=request.user
         ).first()
-        is_solved = sub and sub.score == len(aq.question.test_cases)
+        is_solved = sub and sub.score >= 5
         is_attempted = sub is not None
         nav_questions.append({
             'question': aq.question,
@@ -988,9 +1539,6 @@ def submit_assessment_code(request, assessment_id, question_id):
             'is_attempted': is_attempted,
         })
 
-    # ===============================
-    # 7️⃣ Render Context
-    # ===============================
     context = {
         "assessment": assessment,
         "question": current_question_obj,
@@ -1000,8 +1548,7 @@ def submit_assessment_code(request, assessment_id, question_id):
         "read_only": final_read_only,
         "end_time": deadline.isoformat(),
         "all_questions": nav_questions,
-        "results": submission_results,
-        "task_id": task_id,
+        "results": submission_results,      # last saved results for initial render
         "focus_mode": True,
         "user_submissions": user_submissions,
     }
@@ -1067,6 +1614,8 @@ from .forms import ModuleForm, QuestionForm
 
 @user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_edit_module(request, module_id):
+    print("### USING teacher_edit_module VIEW ###")
+
     module = get_object_or_404(Module, id=module_id)
     
     # Inline formset for questions related to this module
@@ -1569,19 +2118,236 @@ def teacher_quiz_list(request):
     quizzes = Quiz.objects.filter(created_by=request.user)
     return render(request, 'codingapp/teacher_quiz_list.html', {'quizzes': quizzes})
 
+# codingapp/views.py (add at top if not already present)
+import csv
+import io
+from django.db import transaction
+from django.contrib import messages
+from django.shortcuts import redirect, render, get_object_or_404
+from django.contrib.auth.decorators import user_passes_test
+from django.core.files.uploadedfile import UploadedFile
+
+# openpyxl will be used for .xlsx parsing
+try:
+    import openpyxl
+except Exception:
+    openpyxl = None
+
+from .models import Quiz, Question, Module
+from .forms import QuizForm
+from .utils import is_teacher  # adjust to your is_teacher import/location
+
+
 @user_passes_test(is_teacher, login_url='/dashboard/')
-def teacher_quiz_create(request):
+def teacher_quiz_create(request, quiz_id=None):
+    """
+    Handles creating/editing a Quiz and bulk-uploading MCQs.
+    If 'upload_questions' is present in POST, we process the uploaded file and return a result dict to the template.
+    If not, we treat it as a normal Save Quiz action and redirect to quiz list.
+    """
+    # If editing existing quiz (optional), load it
+    quiz = None
+    if quiz_id:
+        quiz = get_object_or_404(Quiz, id=quiz_id, created_by=request.user)
+
     if request.method == "POST":
-        form = QuizForm(request.POST)
-        if form.is_valid():
-            quiz = form.save(commit=False)
-            quiz.created_by = request.user
-            quiz.save()
-            form.save_m2m()
-            return redirect('teacher_quiz_list')
+        form = QuizForm(request.POST, instance=quiz)
+        upload_flag = 'upload_questions' in request.POST
+        uploaded_file = request.FILES.get('bulk_file')  # name from template
+
+        if not form.is_valid():
+            # show form errors and do not proceed
+            return render(request, 'codingapp/teacher_quiz_form.html', {
+                'form': form,
+                'action': 'Edit' if quiz else 'Create',
+            })
+
+        # Save (create or update) the quiz first so we can attach Qs to it
+        quiz = form.save(commit=False)
+        quiz.created_by = request.user
+        quiz.save()
+        form.save_m2m()
+
+        # If user clicked Upload Questions, parse file and attach questions, but stay on same page and show summary
+        if upload_flag:
+            result = {'created': 0, 'skipped': 0, 'errors': []}
+            if not uploaded_file:
+                result['errors'].append("No file uploaded. Please choose a .xlsx or .csv file.")
+                return render(request, 'codingapp/teacher_quiz_form.html', {
+                    'form': form,
+                    'action': 'Edit' if quiz else 'Create',
+                    'result': result
+                })
+
+            # Basic safety check: file size limit (example 5 MB)
+            max_size = 5 * 1024 * 1024
+            if isinstance(uploaded_file, UploadedFile) and uploaded_file.size > max_size:
+                result['errors'].append(f"File too large. Max allowed is {max_size // (1024*1024)} MB.")
+                return render(request, 'codingapp/teacher_quiz_form.html', {
+                    'form': form,
+                    'action': 'Edit' if quiz else 'Create',
+                    'result': result
+                })
+
+            # Read and parse file
+            try:
+                # xlsx
+                if uploaded_file.name.lower().endswith(('.xlsx', '.xls')) and openpyxl:
+                    wb = openpyxl.load_workbook(uploaded_file, read_only=True, data_only=True)
+                    ws = wb.active
+                    rows = list(ws.iter_rows(values_only=True))
+                    if not rows:
+                        result['errors'].append("Spreadsheet is empty.")
+                        return render(request, 'codingapp/teacher_quiz_form.html', {'form': form, 'action': 'Create', 'result': result})
+
+                    headers = [str(h).strip().lower() if h is not None else "" for h in rows[0]]
+                    data_rows = rows[1:]
+                    reader_rows = []
+                    for r in data_rows:
+                        # map header -> cell text
+                        rowdict = {headers[i]: (str(r[i]).strip() if r[i] is not None else "") for i in range(len(headers))}
+                        reader_rows.append(rowdict)
+
+                else:
+                    # assume CSV (read as text)
+                    raw = uploaded_file.read()
+                    # If it's bytes, decode; some UploadedFile may already give bytes
+                    if isinstance(raw, bytes):
+                        try:
+                            text = raw.decode('utf-8')
+                        except UnicodeDecodeError:
+                            try:
+                                text = raw.decode('latin-1')
+                            except Exception:
+                                result['errors'].append("Unable to decode CSV file. Use UTF-8 or Latin-1 encoding.")
+                                return render(request, 'codingapp/teacher_quiz_form.html', {'form': form, 'action': 'Create', 'result': result})
+                    else:
+                        text = str(raw)
+
+                    f = io.StringIO(text)
+                    reader = csv.DictReader(f)
+                    reader_rows = []
+                    for row in reader:
+                        # normalize keys to lowercase
+                        row = {str(k).strip().lower(): (v.strip() if v is not None else "") for k, v in row.items()}
+                        reader_rows.append(row)
+            except Exception as e:
+                result['errors'].append(f"Failed to parse file: {e}")
+                return render(request, 'codingapp/teacher_quiz_form.html', {'form': form, 'action': 'Create', 'result': result})
+
+            # Now iterate rows and create Question objects
+            with transaction.atomic():
+                for idx, row in enumerate(reader_rows, start=1):
+                    try:
+                        # support multiple possible header names
+                        title = (row.get('question text') or row.get('title') or row.get('question') or "").strip()
+                        if not title:
+                            result['errors'].append(f"Row {idx}: missing question text/title.")
+                            continue
+
+                        # Collect options from Option1..Option10 or opt1..opt4
+                        options = []
+                        for i in range(1, 11):
+                            k = f"option{i}"
+                            if k in row and row[k]:
+                                options.append(row[k])
+                        if not options:
+                            # try "option 1" with space or Option1 capitalized handled by lowercase keys earlier
+                            for k in ('option1','option2','option3','option4','a','b','c','d'):
+                                if row.get(k):
+                                    options.append(row.get(k))
+
+                        # remove empty options and ensure at least two
+                        options = [o for o in options if o and o.strip()]
+                        if len(options) < 2:
+                            result['errors'].append(f"Row {idx}: need at least two non-empty options.")
+                            continue
+
+                        # correct answer
+                        corr = (row.get('correct answer') or row.get('correct_answer') or
+                                row.get('correct') or row.get('answer') or "").strip()
+                        if not corr:
+                            result['errors'].append(f"Row {idx}: missing Correct Answer.")
+                            continue
+
+                        # Determine correct_answer text
+                        correct_text = None
+                        if corr.isdigit():
+                            ix = int(corr) - 1
+                            if 0 <= ix < len(options):
+                                correct_text = options[ix]
+                            else:
+                                result['errors'].append(f"Row {idx}: correct answer index {corr} out of range.")
+                                continue
+                        else:
+                            # match ignoring case
+                            matched = None
+                            for opt in options:
+                                if opt.strip().lower() == corr.strip().lower():
+                                    matched = opt
+                                    break
+                            if matched:
+                                correct_text = matched
+                            else:
+                                # not found — still accept but warn
+                                correct_text = corr
+                                result['errors'].append(f"Row {idx}: correct answer '{corr}' not found among options; saved as-is.")
+
+                        description = row.get('description') or row.get('explanation') or ""
+
+                        # Optional: module
+                        module_obj = None
+                        module_key = row.get('module') or row.get('module name') or row.get('module_slug')
+                        if module_key:
+                            module_obj = Module.objects.filter(name__iexact=module_key).first() \
+                                         or Module.objects.filter(slug__iexact=module_key).first()
+                            if not module_obj:
+                                # do not fail; just warn
+                                result['errors'].append(f"Row {idx}: module '{module_key}' not found (question will be created without module).")
+
+                        # Check duplicates: same title + same module => skip
+                        duplicate_qs = Question.objects.filter(title__iexact=title)
+                        if module_obj:
+                            duplicate_qs = duplicate_qs.filter(module=module_obj)
+                        if duplicate_qs.exists():
+                            result['skipped'] += 1
+                            continue
+
+                        # Create question
+                        q = Question.objects.create(
+                            question_type='mcq',
+                            title=title,
+                            description=description,
+                            options=options,
+                            correct_answer=correct_text,
+                            module=module_obj
+                        )
+                        quiz.questions.add(q)
+                        result['created'] += 1
+
+                    except Exception as e:
+                        result['errors'].append(f"Row {idx}: Unexpected error: {e}")
+                        # continue with other rows
+
+            # render same page with result summary
+            return render(request, 'codingapp/teacher_quiz_form.html', {
+                'form': form,
+                'action': 'Edit' if quiz else 'Create',
+                'result': result
+            })
+
+        # else: not upload_flag -> regular Save Quiz flow (redirect to list)
+        messages.success(request, "Quiz saved.")
+        return redirect('teacher_quiz_list')
+
     else:
-        form = QuizForm()
-    return render(request, 'codingapp/teacher_quiz_form.html', {'form': form, 'action': 'Create'})
+        form = QuizForm(instance=quiz)
+
+    return render(request, 'codingapp/teacher_quiz_form.html', {
+        'form': form,
+        'action': 'Edit' if quiz else 'Create'
+    })
+
 
 @user_passes_test(is_teacher, login_url='/dashboard/')
 def teacher_quiz_edit(request, quiz_id):
@@ -1896,116 +2662,179 @@ from django.contrib.auth.decorators import login_required
 
 @login_required
 def course_list(request):
-    user_groups = Group.objects.filter(students=request.user)
-    courses = Course.objects.filter(
-        Q(is_public=True) | Q(groups__in=user_groups)
-    ).distinct()
-    return render(request, 'codingapp/courses/list.html', {'courses': courses})
+    role = request.user.userprofile.role.name.lower()
+
+    if role == "admin":
+        courses = Course.objects.all()
+    else:
+        user_groups = Group.objects.filter(students=request.user)
+        courses = Course.objects.filter(
+            Q(is_public=True) |
+            Q(groups__in=user_groups) |
+            Q(created_by=request.user)
+        ).distinct()
+
+    return render(
+        request,
+        'codingapp/courses/list.html',
+        {'courses': courses}
+    )
+
 
 @login_required
 def course_detail(request, pk):
+    from django.shortcuts import get_object_or_404, render
+    from codingapp.models import Course
+
     course = get_object_or_404(Course, pk=pk)
+
     denied = deny_access_if_not_allowed(request, course)
     if denied:
         return denied
-    # Check access
-    if not course.is_public and not course.groups.filter(id__in=request.user.group_set.values_list('id', flat=True)).exists():
-        return render(request, 'codingapp/courses/denied.html')
+
+    user_profile = request.user.userprofile
+    role = user_profile.role.name.lower()
+
+    # -----------------------------
+    # ADMIN → always allowed
+    # -----------------------------
+    if role == "admin":
+        pass
+
+    # -----------------------------
+    # NON-ADMIN ACCESS CHECK
+    # -----------------------------
+    else:
+        if (
+            not course.is_public and
+            not course.groups.filter(
+                id__in=request.user.custom_groups.values_list('id', flat=True)
+            ).exists()
+        ):
+            return render(request, 'codingapp/courses/denied.html')
+
     lang_list = ['python', 'c', 'cpp', 'java', 'javascript']
-    return render(request, 'codingapp/courses/detail.html', {
-        'course': course,
-        'lang_list': lang_list
-    })
+
+    return render(
+        request,
+        'codingapp/courses/detail.html',
+        {
+            'course': course,
+            'lang_list': lang_list
+        }
+    )
 
 
 
 
 @login_required
-@user_passes_test(is_teacher, login_url='/dashboard/')
+@user_passes_test(is_teacher_or_admin, login_url='/dashboard/')
 def create_course(request):
     if request.method == 'POST':
         form = CourseForm(request.POST)
-        formset = CourseContentFormSet(request.POST, prefix='contents')  # ✅ Fix: use prefix
+        formset = CourseContentFormSet(request.POST, prefix='contents')
 
         if form.is_valid() and formset.is_valid():
             course = form.save(commit=False)
             course.created_by = request.user
             course.save()
             form.save_m2m()
+
             formset.instance = course
             formset.save()
+
             messages.success(request, "Course created successfully.")
             return redirect('manage_courses')
         else:
-            print("Form errors:", form.errors)
-            print("Formset errors:", formset.errors)
             messages.error(request, "Please correct the errors.")
     else:
         form = CourseForm()
-        formset = CourseContentFormSet(prefix='contents')  # ✅ Fix: use same prefix
+        formset = CourseContentFormSet(prefix='contents')
 
-    return render(request, 'codingapp/courses/create.html', {
-        'form': form,
-        'formset': formset,
-    })
+    return render(
+        request,
+        'codingapp/courses/create.html',
+        {
+            'form': form,
+            'formset': formset,
+        }
+    )
+
 
 from django.contrib import messages
 
 @login_required
-@user_passes_test(is_teacher, login_url='/dashboard/')
+@user_passes_test(is_teacher_or_admin, login_url='/dashboard/')
 def manage_courses(request):
-    courses = Course.objects.filter(created_by=request.user)
-    return render(request, 'codingapp/courses/manage.html', {'courses': courses})
+    role = request.user.userprofile.role.name.lower()
+
+    if role == "admin":
+        courses = Course.objects.all()
+    else:
+        courses = Course.objects.filter(created_by=request.user)
+
+    return render(
+        request,
+        'codingapp/courses/manage.html',
+        {'courses': courses}
+    )
 
 
 @login_required
-@user_passes_test(is_teacher, login_url='/dashboard/')
+@user_passes_test(is_teacher_or_admin, login_url='/dashboard/')
 def edit_course(request, pk):
-    course = get_object_or_404(Course, pk=pk, created_by=request.user)
+    role = request.user.userprofile.role.name.lower()
+
+    if role == "admin":
+        course = get_object_or_404(Course, pk=pk)
+    else:
+        course = get_object_or_404(Course, pk=pk, created_by=request.user)
 
     if request.method == 'POST':
         form = CourseForm(request.POST, instance=course)
         formset = CourseContentFormSet(request.POST, instance=course)
 
-        print("POST KEYS:", list(request.POST.keys()))  # ✅ Debugging aid
-
         if form.is_valid() and formset.is_valid():
-            course = form.save()
-            contents = formset.save(commit=False)
-
-            for content in contents:
-                content.course = course  # ✅ Reinforce link
-                content.save()
-
-            for obj in formset.deleted_objects:
-                obj.delete()
-
+            form.save()
+            formset.save()
             messages.success(request, "Course updated successfully.")
             return redirect('manage_courses')
         else:
-            print("Form errors:", form.errors)
-            print("Formset errors:", formset.errors)
             messages.error(request, "Please correct the errors.")
     else:
         form = CourseForm(instance=course)
         formset = CourseContentFormSet(instance=course)
 
-    return render(request, 'codingapp/courses/create.html', {
-        'form': form,
-        'formset': formset,
-    })
-
+    return render(
+        request,
+        'codingapp/courses/create.html',
+        {
+            'form': form,
+            'formset': formset,
+        }
+    )
 
 
 @login_required
-@user_passes_test(is_teacher, login_url='/dashboard/')
+@user_passes_test(is_teacher_or_admin, login_url='/dashboard/')
 def delete_course(request, pk):
-    course = get_object_or_404(Course, pk=pk, created_by=request.user)
+    role = request.user.userprofile.role.name.lower()
+
+    if role == "admin":
+        course = get_object_or_404(Course, pk=pk)
+    else:
+        course = get_object_or_404(Course, pk=pk, created_by=request.user)
+
     if request.method == 'POST':
         course.delete()
         messages.success(request, "Course deleted.")
         return redirect('manage_courses')
-    return render(request, 'codingapp/courses/delete_confirm.html', {'course': course})
+
+    return render(
+        request,
+        'codingapp/courses/delete_confirm.html',
+        {'course': course}
+    )
 
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
@@ -2076,110 +2905,110 @@ from codingapp.models import Submission, QuizSubmission, Module, ModuleCompletio
 from codingapp.utils import get_user_accessible_groups
 from codingapp.utils import is_teacher, is_hod, is_admin
 from codingapp.utils import get_user_accessible_groups
+from codingapp.utils import (
+    get_visible_students,
+    get_student_performance
+)
 
 
 @login_required
 def student_performance_list(request):
-    """
-    Shows performance data for students accessible to the current user:
-    - Admin → all students
-    - HOD → students in their department
-    - Teacher → students in their assigned groups
-    """
-    accessible_groups = get_user_accessible_groups(request.user)
-    profile = getattr(request.user, "userprofile", None)
-    role_name = profile.role.name.lower() if profile and profile.role else "unknown"
+    from codingapp.utils import get_student_performance
+    from codingapp.models import Group, Department
 
-    selected_group_id = request.GET.get("group")
-    search_query = request.GET.get("q", "")
-    sort_key = request.GET.get("sort", "username")
+    profile = request.user.userprofile
+    role = profile.role.name.lower()
 
-    # 🔹 Get student queryset
-    if role_name == "admin":
-        students = User.objects.filter(is_staff=False)
-    else:
-        students = User.objects.filter(
-            is_staff=False,
-            id__in=Group.objects.filter(id__in=accessible_groups).values_list("students__id", flat=True)
+    # -------------------------------
+    # TEACHER → Groups assigned
+    # -------------------------------
+    if role == "teacher":
+        groups = (
+            Group.objects
+            .filter(teachers=request.user)
+            .prefetch_related("students")
         )
 
-    if selected_group_id:
-        students = students.filter(groups__id=selected_group_id)
-    if search_query:
-        students = students.filter(
-            Q(username__icontains=search_query)
-            | Q(userprofile__full_name__icontains=search_query)
+        data = []
+        for group in groups:
+            data.append({
+                "group": group,
+                "students": [
+                    get_student_performance(s)
+                    for s in group.students.all()
+                ]
+            })
+
+        return render(
+            request,
+            "codingapp/performance_teacher.html",
+            {"groups": data}
         )
 
-    students = students.distinct()
+    # -------------------------------
+    # HOD → All groups of department
+    # -------------------------------
+    if role == "hod":
+        groups = (
+            Group.objects
+            .filter(department=profile.department)
+            .prefetch_related("students")
+        )
 
-    total_modules = Module.objects.count()
-    performance_data = []
+        data = []
+        for group in groups:
+            data.append({
+                "group": group,
+                "students": [
+                    get_student_performance(s)
+                    for s in group.students.all()
+                ]
+            })
 
-    for student in students:
-        # Groups that teacher/HOD can access for this student
-        student_groups = Group.objects.filter(students=student, id__in=accessible_groups)
+        return render(
+            request,
+            "codingapp/performance_hod.html",
+            {"groups": data}
+        )
 
-        # ✅ Coding Submissions (modules linked to accessible groups)
-        student_submissions = Submission.objects.filter(
-            user=student,
-            question__module__groups__in=student_groups
-        ).distinct()
+    # -------------------------------
+    # ADMIN → Department → Group → Students
+    # -------------------------------
+    if role == "admin":
+        from codingapp.models import Department
 
-        # ✅ Quiz Submissions (via Assessments linked to accessible groups)
-        accessible_assessments = Assessment.objects.filter(groups__in=student_groups).distinct()
-        quiz_submissions = QuizSubmission.objects.filter(
-            user=student,
-            quiz__in=accessible_assessments.values_list("quiz_id", flat=True)
-        ).distinct()
+        departments = Department.objects.prefetch_related(
+            "groups__students"
+        )
 
-        # ✅ Completed Modules (within accessible groups)
-        completed_modules = ModuleCompletion.objects.filter(
-            user=student,
-            module__groups__in=student_groups,
-            completed=True
-        ).distinct()
+        dept_data = []
 
-        total_coding = student_submissions.count()
-        accepted_coding = student_submissions.filter(status="Accepted").count()
-        total_quizzes = quiz_submissions.count()
-        avg_quiz_score = quiz_submissions.aggregate(avg=Avg("score"))["avg"] or 0
+        for dept in departments:
+            group_blocks = []
 
-        performance_data.append({
-            "student": student,
-            "total_coding": total_coding,
-            "accepted_coding": accepted_coding,
-            "total_quizzes": total_quizzes,
-            "avg_quiz_score": round(avg_quiz_score, 2),
-            "completed_modules": completed_modules.count(),
-            "total_modules": total_modules,
-        })
+            for group in dept.groups.all():  # 👈 FIXED HERE
+                group_blocks.append({
+                    "group": group,
+                    "students": [
+                        get_student_performance(student)
+                        for student in group.students.all()
+                    ]
+                })
 
-    # ✅ Sorting logic
-    sort_map = {
-        "submissions": lambda x: x["total_coding"],
-        "accepted": lambda x: x["accepted_coding"],
-        "quizzes": lambda x: x["total_quizzes"],
-        "score": lambda x: x["avg_quiz_score"],
-        "top_performer": lambda x: (
-            x["accepted_coding"] + x["avg_quiz_score"] + x["completed_modules"]
-        ),
-    }
-    if sort_key in sort_map:
-        performance_data.sort(key=sort_map[sort_key], reverse=True)
-    else:
-        performance_data.sort(key=lambda x: x["student"].username.lower())
+            dept_data.append({
+                "department": dept,
+                "groups": group_blocks
+            })
 
-    groups = accessible_groups
+        return render(
+            request,
+            "codingapp/performance_admin.html",
+            {"departments": dept_data}
+        )
 
-    return render(request, "codingapp/student_performance_list.html", {
-        "performance_data": performance_data,
-        "groups": groups,
-        "selected_group_id": selected_group_id,
-        "search_query": search_query,
-        "sort_key": sort_key,
-        "role_name": role_name,
-    })
+
+    return render(request, "codingapp/permission_denied.html", status=403)
+
 
 from django.http import HttpResponse
 from django.contrib.auth.models import User
@@ -2201,88 +3030,134 @@ from codingapp.utils import get_user_accessible_groups
 from codingapp.utils import is_teacher, is_hod, is_admin
 from codingapp.utils import get_user_accessible_groups
 
-
 @login_required
 def student_performance_detail(request, student_id):
-    """
-    Shows a detailed performance dashboard for a single student:
-    - Admin → all students
-    - HOD → students in their department
-    - Teacher → students in their assigned groups
-    """
+    from django.shortcuts import get_object_or_404, render
+    from django.contrib.auth import get_user_model
+    from codingapp.utils import get_student_performance
 
-    profile = getattr(request.user, "userprofile", None)
-    role_name = profile.role.name.lower() if profile and profile.role else "unknown"
-    accessible_groups = get_user_accessible_groups(request.user)
+    User = get_user_model()
+    viewer_profile = request.user.userprofile
+    role = viewer_profile.role.name.lower()
 
-    # 🔹 Get the target student profile
-    student_profile = get_object_or_404(UserProfile, id=student_id)
-    student_user = student_profile.user
+    # -------------------------------
+    # ADMIN → any student
+    # -------------------------------
+    if role == "admin":
+        student = get_object_or_404(User, id=student_id)
 
-    # --- Permission Check ---
-    if role_name == "hod":
-        if student_profile.department_id != profile.department_id:
-            return HttpResponse("Access denied: Student not in your department.", status=403)
-    elif role_name == "teacher":
-        teacher_groups = Group.objects.filter(teachers=request.user)
-        if not Group.objects.filter(id__in=teacher_groups, students=student_user).exists():
-            return HttpResponse("Access denied: Student not in your assigned groups.", status=403)
-
-    # 🔹 Determine which groups the student belongs to (that the teacher/admin can access)
-    student_groups = Group.objects.filter(students=student_user, id__in=accessible_groups)
-
-    # ✅ Coding submissions (modules in these groups)
-    coding_submissions = (
-        Submission.objects.filter(
-            user=student_user,
-            question__module__groups__in=student_groups
+    # -------------------------------
+    # HOD → students of department
+    # -------------------------------
+    elif role == "hod":
+        student = get_object_or_404(
+            User,
+            id=student_id,
+            custom_groups__department=viewer_profile.department
         )
-        .select_related("question")
-        .distinct()
-        .order_by("-submitted_at")
+
+    # -------------------------------
+    # TEACHER → students of own groups
+    # -------------------------------
+    elif role == "teacher":
+        student = get_object_or_404(
+            User,
+            id=student_id,
+            custom_groups__teachers=request.user
+        )
+
+    # -------------------------------
+    # STUDENT → only self
+    # -------------------------------
+    else:
+        if request.user.id != student_id:
+            return render(
+                request,
+                "codingapp/permission_denied.html",
+                status=403
+            )
+        student = request.user
+
+    # ✅ SINGLE SOURCE OF TRUTH
+    performance = get_student_performance(student)
+
+    # 🔍 Debug (keep temporarily)
+    import pprint
+    print("PERFORMANCE DEBUG FOR:", student.username)
+    pprint.pprint(performance)
+
+    return render(
+        request,
+        "codingapp/student_performance_detail.html",
+        {
+            "student": student,
+            "performance": performance
+        }
     )
 
-    # ✅ Quiz submissions (via assessments linked to those groups)
-    accessible_assessments = Assessment.objects.filter(groups__in=student_groups).distinct()
-    quiz_submissions = (
-        QuizSubmission.objects.filter(
-            user=student_user,
-            quiz__in=accessible_assessments.values_list("quiz_id", flat=True)
-        )
-        .select_related("quiz")
-        .distinct()
-        .order_by("-submitted_at")
+
+@login_required
+def sync_student_external_profiles(request, student_id):
+    from django.shortcuts import redirect, get_object_or_404
+    from django.contrib import messages
+    from django.contrib.auth import get_user_model
+    from codingapp.models import ExternalProfile
+    from codingapp.external_services.codeforces import fetch_codeforces_stats
+    from codingapp.external_services.leetcode import fetch_leetcode_stats
+    from codingapp.external_services.codechef import fetch_codechef_stats
+    from django.utils import timezone
+
+    User = get_user_model()
+
+    # Only teachers / HOD / admin
+    profile = request.user.userprofile
+    role = profile.role.name.lower()
+
+    if role not in ("teacher", "hod", "admin"):
+        messages.error(request, "Permission denied")
+        return redirect("student_performance_detail", student_id=student_id)
+
+    student = get_object_or_404(User, id=student_id)
+
+    ext_profile, _ = ExternalProfile.objects.get_or_create(user=student)
+
+    # ---------------- CODEFORCES ----------------
+    if ext_profile.codeforces_username:
+        cf = fetch_codeforces_stats(ext_profile.codeforces_username)
+        if cf:
+            ext_profile.codeforces_stats = cf
+
+    # ---------------- LEETCODE ------------------
+    if ext_profile.leetcode_username:
+        lc = fetch_leetcode_stats(ext_profile.leetcode_username)
+        if lc:
+            ext_profile.leetcode_stats = lc
+
+    # ---------------- CODECHEF ------------------
+    if ext_profile.codechef_username:
+        cc = fetch_codechef_stats(ext_profile.codechef_username)
+        if cc:
+            ext_profile.codechef_stats = cc
+
+    # ---------------- HACKERRANK (MISSING PART) ----------------
+    if ext_profile.hackerrank_username:
+        external["hackerrank"] = {
+            "username": ext_profile.hackerrank_username,
+            "profile_url": f"https://www.hackerrank.com/{ext_profile.hackerrank_username}"
+        }
+
+    ext_profile.last_synced = timezone.now()
+    ext_profile.save()
+
+    messages.success(
+        request,
+        "External profiles synced successfully."
     )
 
-    # ✅ Module completion overview
-    module_progress = []
-    modules = Module.objects.filter(groups__in=student_groups).distinct()
-
-    for module in modules:
-        questions = module.questions.all()
-        total = questions.count()
-        completed = Submission.objects.filter(
-            user=student_user,
-            question__in=questions,
-            status="Accepted"
-        ).values("question").distinct().count()
-
-        if total > 0:
-            module_progress.append({
-                "module_title": module.title,
-                "completed": completed,
-                "remaining": total - completed
-            })
-
-    context = {
-        "student": student_user,
-        "coding_submissions": coding_submissions,
-        "quiz_submissions": quiz_submissions,
-        "module_progress": module_progress,
-    }
-
-    return render(request, "codingapp/student_performance_detail.html", context)
-
+    return redirect(
+        "student_performance_detail",
+        student_id=student_id
+    )
 
 
 
@@ -2327,30 +3202,157 @@ def export_student_performance(request):
 
     return response
 
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import get_object_or_404, render
+from django.utils import timezone
+from difflib import SequenceMatcher
+from django.db.models import Max
+
+from .models import Assessment, AssessmentSession, AssessmentSubmission, QuizSubmission
+from .utils import normalize_code, penalty_factor_from_plagiarism  # ensure these exist
+
+
 @login_required
 def assessment_result(request, assessment_id):
+    """
+    Render final result for the current user's assessment session.
+    - Records session end_time if not already set.
+    - Computes per-question and overall plagiarism (using normalized code).
+    - Computes raw totals (quiz + coding raw marks) and applies assessment-level penalty.
+    - Persists penalty info to AssessmentSession if fields exist.
+    """
     assessment = get_object_or_404(Assessment, id=assessment_id)
     session = get_object_or_404(AssessmentSession, user=request.user, assessment=assessment)
-# --- FIX: Record the end time when the user finishes ---
+
+    # --- Ensure session end_time is recorded once (finalization) ---
     if not session.end_time:
         session.end_time = timezone.now()
-        session.save()
-    # Get all submissions for this assessment by the user
-    submissions = AssessmentSubmission.objects.filter(user=request.user, assessment=assessment)
-    total_score = sum(sub.score for sub in submissions)
+        session.save(update_fields=["end_time"] if hasattr(session, "end_time") else None)
 
-    # You might want to mark the session as finished, e.g., by setting an end_time
-    # session.end_time = timezone.now()
-    # session.save()
+    # --- Load user's submissions for this assessment ---
+    submissions = AssessmentSubmission.objects.filter(user=request.user, assessment=assessment).select_related("question")
+
+    # Compute coding totals: raw (before per-question penalty) and penalized per-question scores
+    coding_raw_total = 0.0   # sum of raw_score (or score if raw_score missing)
+    coding_penalized_total = 0.0  # sum of stored penalized per-question score (sub.score)
+
+    # ---------- PLAGIARISM: per-question and overall ----------
+    per_question_plag = {}  # question_id -> max similarity %
+    overall_max = 0.0
+
+    # Preload other submissions grouped by question to avoid many DB hits
+    # Build a dict: question_id -> list of other codes (strings)
+    question_ids = {sub.question_id for sub in submissions}
+    others_by_q = {}
+    for qid in question_ids:
+        others = AssessmentSubmission.objects.filter(
+            assessment=assessment, question_id=qid
+        ).exclude(user=request.user).values_list("code", flat=True)
+        # store as list of normalized strings (skip empty)
+        others_by_q[qid] = [normalize_code((c or ""), "") for c in others if (c and c.strip())]
+
+    for sub in submissions:
+        # get raw_score if available, else fallback to score
+        raw = getattr(sub, "raw_score", None)
+        if raw is None:
+            # if raw_score not available, best-effort fallback: if sub.score == 5 assume raw 5 else 0
+            raw = float(sub.score) if (hasattr(sub, "score") and sub.score is not None) else 0.0
+        coding_raw_total += float(raw or 0.0)
+
+        # penalized per-question (score) stored in sub.score
+        coding_penalized_total += float(getattr(sub, "score", 0.0) or 0.0)
+
+        my_code = (sub.code or "").strip()
+        if not my_code:
+            per_question_plag[sub.question_id] = 0.0
+            continue
+
+        norm_my = normalize_code(my_code, "")
+        max_sim = 0.0
+        for o_norm in others_by_q.get(sub.question_id, []):
+            if not o_norm:
+                continue
+            try:
+                sim = SequenceMatcher(None, norm_my, o_norm).ratio()
+                if sim > max_sim:
+                    max_sim = sim
+            except Exception:
+                continue
+
+        pct = round(max_sim * 100, 2)
+        per_question_plag[sub.question_id] = pct
+        if pct > overall_max:
+            overall_max = pct
+
+    # overall average across coding questions (if any)
+    overall_avg = 0.0
+    if per_question_plag:
+        overall_avg = round(sum(per_question_plag.values()) / len(per_question_plag), 2)
+
+    # --- Quiz score (best attempt if multiple) ---
+    quiz_score = 0.0
+    if getattr(assessment, "quiz", None):
+        best_quiz = QuizSubmission.objects.filter(quiz=assessment.quiz, user=request.user).order_by('-score').first()
+        if best_quiz:
+            quiz_score = float(best_quiz.score or 0.0)
+
+    # --- Raw total (quiz + coding raw) and penalized total (after assessment-level penalty) ---
+    raw_total = round(quiz_score + coding_raw_total, 2)
+    # compute assessment-level penalty factor from overall_max (max plagiarism across their coding answers)
+    factor = penalty_factor_from_plagiarism(overall_max)
+    penalized_total = round(raw_total * factor, 2)
+
+    # --- Persist penalty info to session if those fields exist ---
+    session_changed = False
+    if hasattr(session, "penalty_percent"):
+        session.penalty_percent = round(overall_max, 2)
+        session_changed = True
+    if hasattr(session, "penalty_factor"):
+        session.penalty_factor = factor
+        session_changed = True
+    if hasattr(session, "raw_total"):
+        session.raw_total = raw_total
+        session_changed = True
+    if hasattr(session, "penalized_total"):
+        session.penalized_total = penalized_total
+        session_changed = True
+    if hasattr(session, "penalty_applied"):
+        session.penalty_applied = (factor < 1.0)
+        session_changed = True
+
+    if session_changed:
+        # update fields in one save
+        update_fields = []
+        for f in ("penalty_percent", "penalty_factor", "raw_total", "penalized_total", "penalty_applied"):
+            if hasattr(session, f):
+                update_fields.append(f)
+        # always update end_time too
+        if "end_time" not in update_fields and session.end_time:
+            update_fields.append("end_time")
+        session.save(update_fields=update_fields)
+
+    # Decide which total to show to user: penalized_total (if penalty applied) else raw_total
+    display_total = penalized_total if factor < 1.0 else raw_total
 
     context = {
         'assessment': assessment,
         'submissions': submissions,
-        'total_score': total_score,
+        'total_score': display_total,
+        'raw_total': raw_total,
+        'penalized_total': penalized_total,
+        'plag_per_question': per_question_plag,
+        'plag_overall_max': round(overall_max, 2),
+        'plag_overall_avg': overall_avg,
+        'quiz_score': quiz_score,
+        'coding_raw_total': round(coding_raw_total, 2),
+        'coding_penalized_total': round(coding_penalized_total, 2),
+        'penalty_factor': factor,
+        'penalty_applied': (factor < 1.0),
     }
     return render(request, 'codingapp/assessment_result.html', context)
 
-    from django.views.decorators.http import require_POST
+
+from django.views.decorators.http import require_POST
 import json
 
 @login_required
@@ -2395,19 +3397,56 @@ def execute_code_api(request, question_id):
 
 # NEW FUNCTION: Export Assessment Leaderboard to CSV
 
+# In codingapp/views.py
+
+@login_required
 @user_passes_test(is_admin_or_teacher)
 def export_assessment_leaderboard_csv(request, assessment_id):
     assessment = get_object_or_404(Assessment, id=assessment_id)
 
-    # 1. Fetch and Calculate Data (Same core logic as assessment_leaderboard)
-    participant_ids = assessment.groups.prefetch_related('students').values_list('students', flat=True).distinct()
+    # 1. Fetch Participants
+    participant_ids = (
+        assessment.groups
+        .prefetch_related('students')
+        .values_list('students', flat=True)
+        .distinct()
+    )
     participants = User.objects.filter(id__in=participant_ids)
 
-    coding_scores = AssessmentSubmission.objects.filter(
-        assessment=assessment
-    ).values('user__id').annotate(total_coding_score=Sum('score'))
-    coding_scores_dict = {item['user__id']: item['total_coding_score'] for item in coding_scores}
+    # 2. Get Ordered Questions (for columns)
+    assessment_questions = (
+        AssessmentQuestion.objects
+        .filter(assessment=assessment)
+        .select_related('question')
+        .order_by('order')
+    )
+    questions_list = [aq.question for aq in assessment_questions]
 
+    # 3. Map Submissions: {user_id: {question_id: score}}
+    all_submissions = AssessmentSubmission.objects.filter(assessment=assessment)
+
+    user_question_scores = {}
+    user_extra_metrics = {}  # 👈 NEW (plagiarism / AI / similarity)
+
+    for sub in all_submissions:
+        # Scores (existing logic)
+        user_question_scores.setdefault(sub.user_id, {})
+        user_question_scores[sub.user_id][sub.question_id] = sub.score
+
+        # 👇 NEW: collect max similarity / plagiarism per user
+        extra = user_extra_metrics.setdefault(sub.user_id, {
+            'plagiarism': 0.0,
+            'ai': 0.0,
+            'token': 0.0,
+            'structural': 0.0,
+        })
+
+        extra['plagiarism'] = max(extra['plagiarism'], float(sub.plagiarism_percent or 0))
+        extra['ai'] = max(extra['ai'], float(sub.ai_generated_prob or 0))
+        extra['token'] = max(extra['token'], float(sub.token_similarity or 0))
+        extra['structural'] = max(extra['structural'], float(sub.structural_similarity or 0))
+
+    # 4. Get Quiz Scores
     quiz_scores_dict = {}
     if assessment.quiz:
         quiz_scores = QuizSubmission.objects.filter(
@@ -2415,67 +3454,123 @@ def export_assessment_leaderboard_csv(request, assessment_id):
         ).values('user__id', 'score')
         quiz_scores_dict = {item['user__id']: item['score'] for item in quiz_scores}
 
+    # 5. Get Session Times
     sessions = AssessmentSession.objects.filter(
-        assessment=assessment, user__in=participants, end_time__isnull=False
-    ).select_related('user')
-    
+        assessment=assessment,
+        user__in=participants,
+        end_time__isnull=False
+    )
+
     session_times_dict = {}
-    # 
     for session in sessions:
         if session.end_time and session.start_time:
             duration = session.end_time - session.start_time
             total_seconds = int(duration.total_seconds())
-            # Time in minutes for CSV
-            time_minutes = round(total_seconds / 60, 2)
-            session_times_dict[session.user_id] = {'minutes': time_minutes}
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+            time_str = f"{hours}h {minutes}m {seconds}s"
+            session_times_dict[session.user_id] = {
+                'time_str': time_str,
+                'sort_key': total_seconds
+            }
+        else:
+            session_times_dict[session.user_id] = {
+                'time_str': "N/A",
+                'sort_key': float('inf')
+            }
 
-    leaderboard_data = []
-    # 
+    # 6. Build Data Rows
+    data_rows = []
     for user in participants:
         quiz_score = quiz_scores_dict.get(user.id, 0)
-        coding_score = coding_scores_dict.get(user.id, 0)
-        total_score = quiz_score + coding_score
-        
-        time_minutes = session_times_dict.get(user.id, {}).get('minutes', 'N/A')
-        
-        # Only include users who have scored something or have a submission time
-        if total_score > 0 or time_minutes != 'N/A':
-            # Use total_score for sorting, time_minutes for the CSV output
-            leaderboard_data.append({
+
+        current_user_scores = user_question_scores.get(user.id, {})
+        coding_total = sum(current_user_scores.values())
+        total_score = quiz_score + coding_total
+
+        time_info = session_times_dict.get(
+            user.id,
+            {'time_str': "N/A", 'sort_key': float('inf')}
+        )
+
+        # Only include active participants
+        if total_score > 0 or time_info['sort_key'] != float('inf'):
+            extra = user_extra_metrics.get(user.id, {})
+
+            data_rows.append({
                 'username': user.username,
                 'quiz_score': quiz_score,
-                'coding_score': coding_score,
+                'question_scores': [
+                    current_user_scores.get(q.id, 0) for q in questions_list
+                ],
+                'coding_total': coding_total,
                 'total_score': total_score,
-                'time_taken_minutes': time_minutes,
-                'sort_key': time_minutes if isinstance(time_minutes, (int, float)) else float('inf')
+                'time_str': time_info['time_str'],
+                'sort_key': time_info['sort_key'],
+
+                # 👇 NEW FIELDS
+                'plagiarism': extra.get('plagiarism', 0.0),
+                'ai': extra.get('ai', 0.0),
+                'token': extra.get('token', 0.0),
+                'structural': extra.get('structural', 0.0),
             })
 
-    # Sort the final list by total score (desc) then time taken (asc) for accurate ranking
-    leaderboard_data.sort(key=lambda x: (-x['total_score'], x['sort_key']))
+    # 7. Sort by Score then Time
+    data_rows.sort(key=lambda x: (-x['total_score'], x['sort_key']))
 
-    # 2. Configure the HTTP response for CSV download
+    # 8. Write CSV
     response = HttpResponse(content_type='text/csv')
     filename = slugify(assessment.title)
-    response['Content-Disposition'] = f'attachment; filename="{filename}_leaderboard.csv"'
+    response['Content-Disposition'] = (
+        f'attachment; filename="{filename}_leaderboard.csv"'
+    )
 
-    # 3. Create the CSV writer object
     writer = csv.writer(response)
 
-    # 4. Write the header row
-    writer.writerow(['Rank', 'Username', 'Quiz Score', 'Coding Score', 'Total Score', 'Time Taken (Minutes)'])
+    # Header Row
+    header = ['Rank', 'Username']
+    if assessment.quiz:
+        header.append('Quiz Score')
 
-    # 5. Write data rows
-    for rank, entry in enumerate(leaderboard_data, 1):
-        writer.writerow([
-            rank,
-            entry['username'],
-            entry['quiz_score'],
-            entry['coding_score'],
+    for i, q in enumerate(questions_list, 1):
+        header.append(f'Q{i} - {q.title}')
+
+    # 👇 NEW COLUMNS ADDED (nothing removed)
+    header.extend([
+        'Total Coding',
+        'Grand Total',
+        'Plagiarism %',
+        'AI Generated %',
+        'Token Similarity %',
+        'Structural Similarity %',
+        'Time Taken'
+    ])
+    writer.writerow(header)
+
+    # Data Rows
+    for rank, entry in enumerate(data_rows, 1):
+        row = [rank, entry['username']]
+
+        if assessment.quiz:
+            row.append(entry['quiz_score'])
+
+        row.extend(entry['question_scores'])
+
+        row.extend([
+            entry['coding_total'],
             entry['total_score'],
-            entry['time_taken_minutes'],
+            round(entry['plagiarism'], 2),
+            round(entry['ai'] * 100, 2),
+            round(entry['token'] * 100, 2),
+            round(entry['structural'] * 100, 2),
+            entry['time_str'],
         ])
 
+        writer.writerow(row)
+
     return response
+
 
 # 👇 ADD THIS ENTIRE NEW VIEW FUNCTION
 @login_required
@@ -3295,3 +4390,59 @@ def manage_groups(request):
     context["grouped_by_department"] = dict(grouped_by_department)
 
     return render(request, "dashboard/manage_groups.html", context)
+
+@login_required
+def external_profile(request):
+    from django.contrib import messages
+    from django.shortcuts import render, redirect
+    from codingapp.forms import ExternalProfileForm
+    from codingapp.tasks import sync_external_profiles
+    from codingapp.models import ExternalProfile
+
+    # ✅ SAFE: always ensure profile exists
+    profile, created = ExternalProfile.objects.get_or_create(
+        user=request.user
+    )
+
+    if request.method == "POST":
+        print("POST DATA:", request.POST)
+        form = ExternalProfileForm(request.POST, instance=profile)
+        if form.is_valid():
+            form.save()
+            sync_external_profiles.delay(request.user.id)
+            messages.success(
+                request,
+                "External profiles saved. Syncing started."
+            )
+            return redirect("external_profile")
+    else:
+        form = ExternalProfileForm(instance=profile)
+
+    return render(
+        request,
+        "codingapp/external_profile.html",
+        {
+            "form": form,
+            "profile": profile
+        }
+    )
+
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.decorators import login_required
+import json
+
+@login_required
+@csrf_exempt
+def save_hackerrank_badges(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid method"}, status=400)
+
+    data = json.loads(request.body)
+    badges = data.get("badges", [])
+
+    profile = request.user.externalprofile
+    profile.hackerrank_badges = badges
+    profile.save()
+
+    return JsonResponse({"status": "success", "badges_saved": len(badges)})

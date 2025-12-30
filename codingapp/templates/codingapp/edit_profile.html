@@ -7,6 +7,7 @@
     {{ uform.as_p }}
     {{ pform.as_p }}
   </div>
+  <a href="{% url 'forgot_password' %}">Reset Password</a>
   <button type="submit" class="btn btn-success">Save Changes</button>
   <a href="{% url 'dashboard' %}" class="btn btn-secondary">Cancel</a>
 </form>
